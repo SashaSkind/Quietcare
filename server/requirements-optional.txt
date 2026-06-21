@@ -4,6 +4,6 @@
 anthropic>=0.40
 redis>=5.0
 twilio>=9.0
-deepgram-sdk>=3.7
+deepgram-sdk>=3.7,<4  # v4+ is a breaking rewrite; provider targets the v3 API
 sentry-sdk[fastapi]>=2.0
 httpx>=0.27  # used by the BAND message-bus client

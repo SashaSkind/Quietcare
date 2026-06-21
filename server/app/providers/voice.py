@@ -59,7 +59,14 @@ class DeepgramVoice(Voice):
     async def synthesize(self, text: str) -> str:
         from deepgram import SpeakOptions
 
-        options = SpeakOptions(model="aura-asteria-en")
+        # Emit WAV (linear16) so the audio matches the mock's format and the
+        # client's playback contract stays consistent across mock/real voice.
+        options = SpeakOptions(
+            model="aura-asteria-en",
+            encoding="linear16",
+            container="wav",
+            sample_rate=24000,
+        )
         resp = await self._client.speak.asyncrest.v("1").stream_memory(
             {"text": text}, options
         )

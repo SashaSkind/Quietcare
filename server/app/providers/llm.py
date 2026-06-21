@@ -184,6 +184,13 @@ class MockLLM(LLM):
             return self._elder_step(messages)
         if "send_caretaker_sms" in tool_names:
             return self._caretaker_step(messages)
+        # Caretaker SMS recap path (no tools): produce a short, plausible reply.
+        if "caretaker assistant" in (system or "").lower():
+            text = (
+                "Thanks for checking in — they're doing okay today, no concerning "
+                "events recently. I'll text you right away if anything changes."
+            )
+            return LLMResult(content=[{"type": "text", "text": text}], text=text)
         # No tools: just answer.
         return LLMResult(content=[{"type": "text", "text": "ok"}], text="ok")
 

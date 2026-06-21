@@ -57,7 +57,14 @@
           "project": "quitecareclient"
         }
       ],
-      "expo-asset"
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Quietcare uses location to detect if you leave a safe zone, so a caretaker can be alerted to possible wandering."
+        }
+      ],
+      "expo-asset",
+      "react-native-fast-tflite"
     ],
     "extra": {
       "eas": {

@@ -4,6 +4,22 @@
 anthropic>=0.40
 redis>=5.0
 twilio>=9.0
-deepgram-sdk>=3.7
+deepgram-sdk>=3.7,<4  # v4+ is a breaking rewrite; provider targets the v3 API
 sentry-sdk[fastapi]>=2.0
 httpx>=0.27  # used by the BAND message-bus client
+numpy>=1.24  # audio decode/resample for YAMNet/PANNs
+ai-edge-litert>=1.0  # TFLite runtime for YAMNet (or use tflite-runtime)
+kagglehub>=0.3  # used by scripts/fetch_yamnet.py to pull the YAMNet TFLite model
+# Playwright for Browserbase live page automation (real refill navigation over
+# the session's CDP URL). Optional — without it, refill is session-only.
+# After install run:  python -m playwright install chromium
+playwright>=1.40
+# Arize AX observability: OpenTelemetry traces of the agent tool-use loop +
+# OpenInference auto-instrumentation of the Anthropic SDK. Optional — without
+# these (or without ARIZE_SPACE_ID/ARIZE_API_KEY) tracing is a no-op.
+arize-otel>=0.7
+openinference-instrumentation-anthropic>=0.1
+# PANNs CNN14 audio-scene backend (heavy: pulls torch). Optional — only needed
+# when AUDIO_SCENE_BACKEND=panns or both.
+panns-inference>=0.1.1
+# torch  # installed transitively by panns-inference; pin here if you need CPU/CUDA build

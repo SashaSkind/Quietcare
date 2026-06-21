@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from .protocol import (
@@ -36,8 +37,11 @@ class ElderSession:
         self.trigger_source = "manual"
         self.device_state: dict[str, Any] = {}
         self.hard_fall = False
+        self.trigger_note: Optional[str] = None
+        self.trigger_location: Optional[dict[str, Any]] = None
         self.trigger_transcript = ""
         self.last_transcript = ""
+        self.acoustic_evidence: dict[str, Any] = {}
 
     def reset_incident(self) -> None:
         """Start a fresh incident: a new FSM and cleared per-incident state.
@@ -51,6 +55,7 @@ class ElderSession:
         self._pending.clear()
         self.last_transcript = ""
         self.trigger_transcript = ""
+        self.acoustic_evidence = {}
 
     # ---- outbound ----
     async def _send(self, model: Any) -> None:
@@ -76,6 +81,26 @@ class ElderSession:
 
     async def send_listen(self, prompt_id: str, duration_ms: int) -> None:
         await self._send(ListenMessage(prompt_id=prompt_id, duration_ms=duration_ms))
+
+    async def speak(self, text: str) -> str:
+        """Synthesize + play a one-off spoken message (no FSM coupling). Used by
+        medication reminders and the call-me bridge."""
+        audio_b64 = await self.providers.voice.synthesize(text)
+        prompt_id = self.new_prompt_id()
+        await self.send_speak(prompt_id, audio_b64, text)
+        return prompt_id
+
+    async def speak_and_listen(self, text: str, duration_ms: int = 8000) -> str:
+        """Speak a message, then listen and return the transcript (FSM-free)."""
+        prompt_id = await self.speak(text)
+        await self.send_listen(prompt_id, duration_ms)
+        audio_b64 = await self.await_audio_response(prompt_id)
+        return await self.providers.voice.transcribe(audio_b64)
+
+    @property
+    def is_busy(self) -> bool:
+        """True while an incident is in flight (don't interrupt with reminders)."""
+        return self.fsm.state not in (State.IDLE, State.RESOLVED)
 
     # ---- check-in request/response correlation ----
     async def await_audio_response(self, prompt_id: str) -> Optional[str]:
@@ -138,8 +163,13 @@ async def handle_trigger(session: ElderSession, trigger: TriggerMessage) -> None
     session.reset_incident()
     session.trigger_source = trigger.trigger_source
     session.device_state = trigger.device_state.model_dump()
-    # Heuristic: an unambiguous hard fall may bypass the check-in requirement.
-    session.hard_fall = trigger.trigger_source == "fall"
+    session.trigger_note = trigger.note
+    session.trigger_location = (
+        trigger.location.model_dump() if trigger.location else None
+    )
+    # A hard fall or a geofence breach (the person isn't home to answer a voice
+    # check-in) may bypass the check-in requirement before escalation.
+    session.hard_fall = trigger.trigger_source in ("fall", "geofence")
 
     await session.send_ack("trigger")
     session.fsm.trigger()
@@ -149,6 +179,11 @@ async def handle_trigger(session: ElderSession, trigger: TriggerMessage) -> None
     session.trigger_transcript = await p.voice.transcribe(trigger.audio_clip_b64)
     logger.info("trigger acoustic context: %r", session.trigger_transcript)
 
+    # Non-speech distress detection (thud/scream/groan) on the trigger clip.
+    scene = await p.audio_scene.classify(trigger.audio_clip_b64)
+    session.acoustic_evidence["trigger"] = scene.to_dict()
+    logger.info("trigger audio scene: %s", scene.to_dict())
+
     summary = await run_elder_agent(session, p.llm)
     logger.info("elder-agent done: %s", summary)
 
@@ -156,13 +191,42 @@ async def handle_trigger(session: ElderSession, trigger: TriggerMessage) -> None
     await session.resolve()
     logger.info("FSM trace[%s]: %s", session.elder_id, session.fsm.trace())
 
+    # Persist a structured incident record regardless of which tools the LLM
+    # chose to call, so the caretaker history is always complete.
+    escalated = session.fsm.state in (
+        State.ESCALATING,
+        State.CARETAKER_NOTIFIED,
+        State.HUMAN_ACK,
+        State.GATED_911,
+    )
+    incident = {
+        "kind": "incident",
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "trigger_source": session.trigger_source,
+        "final_state": session.fsm.state.value,
+        "fsm_trace": session.fsm.trace(),
+        "escalated": escalated,
+        "last_transcript": session.last_transcript,
+        "summary": summary,
+    }
+    try:
+        await p.memory.log_event(session.elder_id, incident)
+    except Exception as exc:  # pragma: no cover - external store
+        logger.warning("incident persist failed (%s)", exc)
+
 
 class CaretakerService:
     """Subscribes to the bus and runs the caretaker-agent per escalation."""
 
-    def __init__(self, providers: Providers, registry: SessionRegistry) -> None:
+    def __init__(
+        self,
+        providers: Providers,
+        registry: SessionRegistry,
+        confirmations: Any = None,
+    ) -> None:
         self.providers = providers
         self.registry = registry
+        self.confirmations = confirmations
         self.last_result: Optional[str] = None
 
     def attach(self) -> None:
@@ -179,5 +243,60 @@ class CaretakerService:
             logger.warning("caretaker: no session for %s", elder_id)
             return
         logger.info("caretaker-agent handling: %s", json.dumps(msg))
-        self.last_result = await run_caretaker_agent(session, self.providers.llm, msg)
+        self.last_result = await run_caretaker_agent(
+            session, self.providers.llm, msg, self.confirmations
+        )
         logger.info("caretaker-agent done: %s", self.last_result)
+
+
+async def confirm_911(
+    *,
+    registry: SessionRegistry,
+    confirmations: Any,
+    providers: Providers,
+    elder_id: str,
+    token: str,
+    approve: bool,
+) -> dict[str, Any]:
+    """Resolve a human 911 authorization. On approval, gate the FSM and dispatch
+    the (configurable, mock-by-default) emergency call. Raises on bad token /
+    missing request so the caller can return the right HTTP status."""
+    pc = confirmations.resolve(elder_id, token, approve)  # KeyError/Perm/Value
+    if not approve:
+        logger.info("911 authorization REJECTED for %s", elder_id)
+        return {"status": "rejected", "elder_id": elder_id}
+
+    # Policy gate: even after human approval, the emergency dispatch must be
+    # sanctioned by the gate before it can fire.
+    decision = await providers.policy_gate.sanction(
+        "emergency_dispatch",
+        {
+            "elder_id": elder_id,
+            "reason": pc.reason,
+            "summary": pc.summary,
+            "human_confirmed": True,
+        },
+    )
+    if not decision.allowed:
+        logger.warning(
+            "emergency dispatch BLOCKED by policy gate for %s: %s",
+            elder_id,
+            decision.reason,
+        )
+        return {
+            "status": "blocked_by_policy",
+            "elder_id": elder_id,
+            "reason": decision.reason,
+        }
+
+    session = registry.get(elder_id)
+    if session is not None:
+        session.fsm.gate_911(human_confirmed=True)
+        await session.send_status()
+    res = await providers.telephony.dispatch_emergency(pc.summary or pc.reason)
+    logger.info("911 authorization CONFIRMED for %s; dispatch=%s", elder_id, res.detail)
+    return {
+        "status": "confirmed",
+        "elder_id": elder_id,
+        "dispatch": {"ok": res.ok, "mocked": res.mocked, "detail": res.detail},
+    }

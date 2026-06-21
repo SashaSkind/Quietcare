@@ -15,10 +15,12 @@ frame with a `type` field. All audio is base64-encoded WAV or Opus.
   "type": "trigger",
   "elder_id": "margaret-01",
   "ts": "2026-06-20T18:30:00Z",
-  "trigger_source": "fall" | "audio_event" | "scheduled" | "manual",
+  "trigger_source": "fall" | "audio_event" | "scheduled" | "manual" | "inactivity" | "geofence",
   "audio_clip_b64": "<base64 audio ~3-5s, or null>",
   "frame_b64": "<base64 jpeg, or null>",
-  "device_state": { "battery": 0.82, "connectivity": "wifi" }
+  "device_state": { "battery": 0.82, "connectivity": "wifi" },
+  "note": "<optional short human note, e.g. 'left safe zone'>",
+  "location": { "lat": 37.7749, "lng": -122.4194 }
 }
 
 {

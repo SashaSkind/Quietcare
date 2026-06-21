@@ -1,0 +1,48 @@
+{
+  "expo": {
+    "name": "Quietcare",
+    "slug": "quietcare-client",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0f172a"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.quietcare.client",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Quietcare records short audio clips during a check-in so a caretaker can confirm you are okay.",
+        "NSMotionUsageDescription": "Quietcare reads motion sensors to detect possible falls."
+      }
+    },
+    "android": {
+      "package": "com.quietcare.client",
+      "permissions": ["RECORD_AUDIO", "HIGH_SAMPLING_RATE_SENSORS"]
+    },
+    "plugins": [
+      "expo-dev-client",
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Quietcare records short audio clips during a check-in so a caretaker can confirm you are okay."
+        }
+      ],
+      [
+        "@sentry/react-native/expo",
+        {
+          "organization": "REPLACE_WITH_SENTRY_ORG_SLUG",
+          "project": "REPLACE_WITH_SENTRY_CLIENT_PROJECT_SLUG"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "REPLACE_WITH_EAS_PROJECT_ID"
+      }
+    }
+  }
+}

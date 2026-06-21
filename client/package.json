@@ -1,0 +1,31 @@
+{
+  "name": "quietcare-client",
+  "version": "0.1.0",
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start --dev-client",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web",
+    "mock": "node mock/server.js",
+    "gen:audio": "node scripts/gen-audio.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "expo": "~52.0.0",
+    "expo-av": "~15.0.1",
+    "expo-dev-client": "~5.0.0",
+    "expo-file-system": "~18.0.4",
+    "expo-sensors": "~14.0.1",
+    "expo-status-bar": "~2.0.0",
+    "@sentry/react-native": "~6.3.0",
+    "react": "18.3.1",
+    "react-native": "0.76.3"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.25.2",
+    "@types/react": "~18.3.12",
+    "typescript": "~5.3.3"
+  },
+  "private": true
+}

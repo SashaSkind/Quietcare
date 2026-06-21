@@ -58,6 +58,13 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8080
 
+    # Auth: when true, WS register/trigger must carry a valid per-device token
+    # (provision via POST /elders). Default false to keep the zero-config demo.
+    require_device_auth: bool = False
+    # Optional shared admin token guarding elder provisioning endpoints. When
+    # unset, provisioning is open (suitable for local/demo only).
+    admin_token: str = ""
+
     # ---- capability flags ----
     @property
     def has_anthropic(self) -> bool:

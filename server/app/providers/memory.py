@@ -10,6 +10,8 @@ import json
 from abc import ABC, abstractmethod
 from typing import Any
 
+ELDERS_INDEX = "elders:index"
+
 SAMPLE_ELDER = {
     "elder_id": "margaret-01",
     "name": "Margaret",
@@ -45,11 +47,33 @@ class Memory(ABC):
     async def get_profile(self, elder_id: str) -> dict[str, Any] | None:
         return await self.get(f"elder:{elder_id}:profile")
 
+    async def set_profile(self, elder_id: str, profile: dict[str, Any]) -> None:
+        await self.set(f"elder:{elder_id}:profile", profile)
+        await self._index_elder(elder_id)
+
+    async def list_elders(self) -> list[str]:
+        # The index may contain duplicates across appends; de-dup preserving order.
+        seen: list[str] = []
+        for eid in await self.list(ELDERS_INDEX):
+            if eid not in seen:
+                seen.append(eid)
+        return seen
+
+    async def _index_elder(self, elder_id: str) -> None:
+        if elder_id not in await self.list_elders():
+            await self.append(ELDERS_INDEX, elder_id)
+
     async def get_events(self, elder_id: str) -> list[Any]:
         return await self.list(f"elder:{elder_id}:events")
 
     async def log_event(self, elder_id: str, event: Any) -> None:
         await self.append(f"elder:{elder_id}:events", event)
+
+    async def set_device_token(self, elder_id: str, token: str) -> None:
+        await self.set(f"elder:{elder_id}:device_token", token)
+
+    async def get_device_token(self, elder_id: str) -> str | None:
+        return await self.get(f"elder:{elder_id}:device_token")
 
 
 class RedisMemory(Memory):
@@ -77,9 +101,7 @@ class RedisMemory(Memory):
     async def seed(self) -> None:
         existing = await self.get_profile(SAMPLE_ELDER["elder_id"])
         if existing is None:
-            await self.set(
-                f"elder:{SAMPLE_ELDER['elder_id']}:profile", SAMPLE_ELDER
-            )
+            await self.set_profile(SAMPLE_ELDER["elder_id"], SAMPLE_ELDER)
 
 
 class MockMemory(Memory):
@@ -88,8 +110,9 @@ class MockMemory(Memory):
     def __init__(self) -> None:
         self._kv: dict[str, Any] = {}
         self._lists: dict[str, list[Any]] = {}
-        # seed
+        # seed the sample elder + index
         self._kv[f"elder:{SAMPLE_ELDER['elder_id']}:profile"] = SAMPLE_ELDER
+        self._lists[ELDERS_INDEX] = [SAMPLE_ELDER["elder_id"]]
 
     async def get(self, key: str) -> Any | None:
         return self._kv.get(key)

@@ -23,11 +23,13 @@ class DeviceState(BaseModel):
 class RegisterMessage(BaseModel):
     type: Literal["register"]
     elder_id: str
+    device_token: Optional[str] = None
 
 
 class TriggerMessage(BaseModel):
     type: Literal["trigger"]
     elder_id: str
+    device_token: Optional[str] = None
     ts: Optional[str] = None
     trigger_source: TriggerSource = "manual"
     audio_clip_b64: Optional[str] = None

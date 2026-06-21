@@ -7,9 +7,12 @@ import json
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from typing import Optional
+
+from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
+from .auth import provision_device, verify_device
 from .config import settings
 from .confirmations import ConfirmationRegistry
 from .protocol import (
@@ -112,10 +115,70 @@ async def post_confirm_911(elder_id: str, body: Confirm911Request) -> dict[str, 
         raise HTTPException(status_code=409, detail=str(exc))
 
 
+class ElderCreate(BaseModel):
+    elder_id: str
+    name: str
+    age: Optional[int] = None
+    medications: list[str] = []
+    conditions: list[str] = []
+    prior_falls: int = 0
+    notes: str = ""
+    caretaker: dict = {}
+
+
+def _check_admin(token: Optional[str]) -> None:
+    """Guard provisioning endpoints when an ADMIN_TOKEN is configured."""
+    if settings.admin_token and token != settings.admin_token:
+        raise HTTPException(status_code=401, detail="admin token required")
+
+
+@app.post("/elders")
+async def create_elder(
+    body: ElderCreate, x_admin_token: Optional[str] = Header(default=None)
+) -> dict[str, object]:
+    """Provision an elder profile + a one-time device token (shown once)."""
+    _check_admin(x_admin_token)
+    memory = app.state.providers.memory
+    if await memory.get_profile(body.elder_id) is not None:
+        raise HTTPException(status_code=409, detail="elder already exists")
+    profile = body.model_dump()
+    await memory.set_profile(body.elder_id, profile)
+    token = await provision_device(memory, body.elder_id)
+    return {"elder_id": body.elder_id, "device_token": token, "profile": profile}
+
+
+@app.get("/elders")
+async def list_elders() -> dict[str, object]:
+    elders = await app.state.providers.memory.list_elders()
+    return {"elders": elders}
+
+
+@app.get("/elders/{elder_id}")
+async def get_elder(elder_id: str) -> dict[str, object]:
+    profile = await app.state.providers.memory.get_profile(elder_id)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="elder not found")
+    # Never expose the device token via the read API.
+    return {"elder_id": elder_id, "profile": profile}
+
+
 def _spawn(coro) -> None:
     task = asyncio.create_task(coro)
     app.state.bg_tasks.add(task)
     task.add_done_callback(app.state.bg_tasks.discard)
+
+
+async def _authorized(websocket: WebSocket, msg) -> bool:
+    """Enforce per-device auth when enabled. Returns False (and notifies the
+    client) if the device token is missing/invalid."""
+    if not settings.require_device_auth:
+        return True
+    token = getattr(msg, "device_token", None)
+    if await verify_device(app.state.providers.memory, msg.elder_id, token):
+        return True
+    logger.warning("auth failed for elder %s", msg.elder_id)
+    await websocket.send_text(json.dumps({"type": "ack", "received": "auth_failed"}))
+    return False
 
 
 @app.websocket("/ws")
@@ -135,6 +198,10 @@ async def ws_endpoint(websocket: WebSocket) -> None:
             except Exception as exc:
                 logger.warning("bad client frame: %s", exc)
                 continue
+
+            if isinstance(msg, (RegisterMessage, TriggerMessage)):
+                if not await _authorized(websocket, msg):
+                    continue
 
             if isinstance(msg, RegisterMessage):
                 elder_id = msg.elder_id

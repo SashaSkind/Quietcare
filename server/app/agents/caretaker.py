@@ -59,6 +59,21 @@ CARETAKER_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "refill_medication",
+        "description": (
+            "Hand off an everyday-care errand (e.g. a prescription refill) to a "
+            "cloud browser via Browserbase. Off the emergency critical path."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "medication": {"type": "string"},
+                "pharmacy_url": {"type": "string"},
+            },
+            "required": ["medication"],
+        },
+    },
+    {
         "name": "request_911_confirmation",
         "description": (
             "Request human authorization to call emergency services. Alerts the "
@@ -115,6 +130,17 @@ async def run_caretaker_agent(
 
         if name == "book_task":
             return f"task booked (stub): {json.dumps(args.get('task', {}))}"
+
+        if name == "refill_medication":
+            medication = args.get("medication", "")
+            task = f"Refill prescription: {medication}"
+            res = await p.browser.run_task(
+                task, {"elder_id": elder_id, "pharmacy_url": args.get("pharmacy_url")}
+            )
+            return (
+                f"refill handoff: ok={res.ok} mocked={res.mocked} ({res.detail})"
+                + (f" replay={res.replay_url}" if res.replay_url else "")
+            )
 
         if name == "request_911_confirmation":
             reason = args.get("reason", "")

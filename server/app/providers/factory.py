@@ -13,6 +13,7 @@ from .audio_scene import (
     PannsAudioScene,
     YamnetAudioScene,
 )
+from .browser import Browser, BrowserbaseBrowser, MockBrowser
 from .bus import BandBus, InProcessBus, MessageBus
 from .llm import LLM, AnthropicLLM, MockLLM
 from .memory import Memory, MockMemory, RedisMemory
@@ -32,6 +33,7 @@ class Providers:
     # Defaulted so existing constructions (and tests) remain valid; the factory
     # always supplies a concrete instance.
     audio_scene: AudioScene = field(default_factory=MockAudioScene)
+    browser: Browser = field(default_factory=MockBrowser)
 
     def summary(self) -> dict[str, str]:
         return {
@@ -41,6 +43,7 @@ class Providers:
             "telephony": self.telephony.name,
             "bus": self.bus.name,
             "audio_scene": self.audio_scene.name,
+            "browser": self.browser.name,
         }
 
 
@@ -158,6 +161,16 @@ def _build_audio_scene(s: Settings) -> AudioScene:
     return _try_yamnet(s) or MockAudioScene()
 
 
+def _build_browser(s: Settings) -> Browser:
+    if s.has_browserbase:
+        try:
+            logger.info("browser: Browserbase enabled")
+            return BrowserbaseBrowser(s.browserbase_api_key, s.browserbase_project_id)
+        except Exception as exc:
+            logger.warning("Browserbase init failed (%s); using mock browser", exc)
+    return MockBrowser()
+
+
 def build_providers(s: Settings) -> Providers:
     providers = Providers(
         llm=_build_llm(s),
@@ -166,6 +179,7 @@ def build_providers(s: Settings) -> Providers:
         telephony=_build_telephony(s),
         bus=_build_bus(s),
         audio_scene=_build_audio_scene(s),
+        browser=_build_browser(s),
     )
     logger.info("providers: %s", providers.summary())
     return providers

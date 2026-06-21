@@ -9,10 +9,19 @@ from contextlib import asynccontextmanager
 
 from typing import Optional
 
-from fastapi import FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import (
+    FastAPI,
+    Form,
+    Header,
+    HTTPException,
+    Response,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from pydantic import BaseModel
 
 from .auth import provision_device, verify_device
+from .caretaker_query import resolve_elder_by_caretaker, summarize_for_caretaker
 from .config import settings
 from .confirmations import ConfirmationRegistry
 from .protocol import (
@@ -176,6 +185,59 @@ async def get_elder_events(
     if limit and limit > 0:
         events = events[-limit:]
     return {"elder_id": elder_id, "count": len(events), "events": events}
+
+
+def _twiml(message: str) -> Response:
+    """Build a TwiML SMS reply (Twilio sends `message` back to the texter)."""
+    escaped = (
+        message.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    )
+    xml = f"<?xml version='1.0' encoding='UTF-8'?><Response><Message>{escaped}</Message></Response>"
+    return Response(content=xml, media_type="application/xml")
+
+
+@app.post("/twilio/sms")
+async def twilio_inbound_sms(
+    Body: str = Form(default=""),
+    From: str = Form(default=""),
+) -> Response:
+    """Inbound caretaker SMS ("how's mom today?"). Resolves the elder from the
+    sender's number, generates a warm recap from profile + recent incidents, and
+    replies via TwiML. Read-only; off the emergency path."""
+    providers = app.state.providers
+    question = Body.strip() or "How is she doing?"
+    try:
+        elder_id = await resolve_elder_by_caretaker(providers.memory, From)
+        if elder_id is None:
+            return _twiml(
+                "This number isn't linked to a Quietcare resident yet. "
+                "Please contact support to connect your account."
+            )
+        recap = await summarize_for_caretaker(providers, elder_id, question)
+        return _twiml(recap)
+    except Exception as exc:
+        capture(exc, where="twilio_inbound_sms", sender=From)
+        logger.exception("inbound sms failed: %s", exc)
+        return _twiml("Sorry, I couldn't pull an update right now. Please try again shortly.")
+
+
+class RefillRequest(BaseModel):
+    medication: str
+    pharmacy_url: Optional[str] = None
+
+
+@app.post("/elders/{elder_id}/refill")
+async def refill_medication(elder_id: str, body: RefillRequest) -> dict[str, object]:
+    """Everyday-care errand: hand a prescription refill to the browser provider
+    (Browserbase). Off the emergency critical path."""
+    providers = app.state.providers
+    if await providers.memory.get_profile(elder_id) is None:
+        raise HTTPException(status_code=404, detail="elder not found")
+    res = await providers.browser.run_task(
+        f"Refill prescription: {body.medication}",
+        {"elder_id": elder_id, "pharmacy_url": body.pharmacy_url},
+    )
+    return {"elder_id": elder_id, "task": res.to_dict()}
 
 
 def _spawn(coro) -> None:

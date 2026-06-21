@@ -66,6 +66,12 @@ class Settings(BaseSettings):
     # dispatch is logged only (mocked), even with real Twilio.
     emergency_number: str = ""
 
+    # Browser automation (Browserbase) for the everyday-care computer-use path
+    # (e.g. medication refill on a pharmacy portal). When unset, a mock browser
+    # logs the intended task. This always runs OFF the emergency critical path.
+    browserbase_api_key: str = ""
+    browserbase_project_id: str = ""
+
     # Sentry
     sentry_dsn: str = ""
 
@@ -120,6 +126,10 @@ class Settings(BaseSettings):
     @property
     def has_band(self) -> bool:
         return bool(self.band_api_key and self.band_rest_url)
+
+    @property
+    def has_browserbase(self) -> bool:
+        return bool(self.browserbase_api_key and self.browserbase_project_id)
 
     @property
     def has_sentry(self) -> bool:

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ..config import Settings
+from .audio_scene import AudioScene, MockAudioScene, YamnetAudioScene
 from .bus import BandBus, InProcessBus, MessageBus
 from .llm import LLM, AnthropicLLM, MockLLM
 from .memory import Memory, MockMemory, RedisMemory
@@ -22,6 +23,9 @@ class Providers:
     memory: Memory
     telephony: Telephony
     bus: MessageBus
+    # Defaulted so existing constructions (and tests) remain valid; the factory
+    # always supplies a concrete instance.
+    audio_scene: AudioScene = field(default_factory=MockAudioScene)
 
     def summary(self) -> dict[str, str]:
         return {
@@ -30,6 +34,7 @@ class Providers:
             "memory": self.memory.name,
             "telephony": self.telephony.name,
             "bus": self.bus.name,
+            "audio_scene": self.audio_scene.name,
         }
 
 
@@ -99,6 +104,17 @@ def _build_bus(s: Settings) -> MessageBus:
     return InProcessBus()
 
 
+def _build_audio_scene(s: Settings) -> AudioScene:
+    if s.has_yamnet:
+        try:
+            scene = YamnetAudioScene(s.yamnet_model_path, s.yamnet_labels_path)
+            logger.info("audio_scene: YAMNet model loaded")
+            return scene
+        except Exception as exc:
+            logger.warning("YAMNet init failed (%s); using mock audio scene", exc)
+    return MockAudioScene()
+
+
 def build_providers(s: Settings) -> Providers:
     providers = Providers(
         llm=_build_llm(s),
@@ -106,6 +122,7 @@ def build_providers(s: Settings) -> Providers:
         memory=_build_memory(s),
         telephony=_build_telephony(s),
         bus=_build_bus(s),
+        audio_scene=_build_audio_scene(s),
     )
     logger.info("providers: %s", providers.summary())
     return providers

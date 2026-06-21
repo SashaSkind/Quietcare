@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     # Voice
     deepgram_api_key: str = ""
 
+    # Audio-scene ML (YAMNet/AudioSet distress detection). Both paths must point
+    # at a local YAMNet .tflite model and its class-map CSV; when unset, a
+    # deterministic mock derives distress tags from scenario hints.
+    yamnet_model_path: str = ""
+    yamnet_labels_path: str = ""
+
     # Memory
     redis_url: str = ""
 
@@ -77,6 +83,17 @@ class Settings(BaseSettings):
     @property
     def has_deepgram(self) -> bool:
         return bool(self.deepgram_api_key)
+
+    @property
+    def has_yamnet(self) -> bool:
+        import os
+
+        return bool(
+            self.yamnet_model_path
+            and self.yamnet_labels_path
+            and os.path.exists(self.yamnet_model_path)
+            and os.path.exists(self.yamnet_labels_path)
+        )
 
     @property
     def has_redis(self) -> bool:

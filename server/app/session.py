@@ -39,6 +39,7 @@ class ElderSession:
         self.hard_fall = False
         self.trigger_transcript = ""
         self.last_transcript = ""
+        self.acoustic_evidence: dict[str, Any] = {}
 
     def reset_incident(self) -> None:
         """Start a fresh incident: a new FSM and cleared per-incident state.
@@ -52,6 +53,7 @@ class ElderSession:
         self._pending.clear()
         self.last_transcript = ""
         self.trigger_transcript = ""
+        self.acoustic_evidence = {}
 
     # ---- outbound ----
     async def _send(self, model: Any) -> None:
@@ -149,6 +151,11 @@ async def handle_trigger(session: ElderSession, trigger: TriggerMessage) -> None
     # Acoustic context from the pre-event clip (decision uses the check-in).
     session.trigger_transcript = await p.voice.transcribe(trigger.audio_clip_b64)
     logger.info("trigger acoustic context: %r", session.trigger_transcript)
+
+    # Non-speech distress detection (thud/scream/groan) on the trigger clip.
+    scene = await p.audio_scene.classify(trigger.audio_clip_b64)
+    session.acoustic_evidence["trigger"] = scene.to_dict()
+    logger.info("trigger audio scene: %s", scene.to_dict())
 
     summary = await run_elder_agent(session, p.llm)
     logger.info("elder-agent done: %s", summary)

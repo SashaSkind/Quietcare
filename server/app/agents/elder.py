@@ -17,8 +17,11 @@ ELDER_SYSTEM = (
     "elder's profile and recent events, (2) run a brief spoken check-in using "
     "speak_to_elder then listen_to_elder, and (3) FUSE the signals — the "
     "trigger source, what you hear back, and whether they responded at all — "
-    "into a decision. If they clearly say they're fine, log the event and stop. "
-    "If they don't respond clearly or indicate distress, call "
+    "into a decision. Use get_acoustic_evidence to factor in non-speech sounds "
+    "(thud, scream, groan, glass) detected on the trigger clip and check-in. "
+    "If they clearly say they're fine and there's no acoustic distress, log the "
+    "event and stop. If they don't respond clearly, indicate distress, or the "
+    "audio shows a thud/scream with no reassuring reply, call "
     "notify_caretaker_agent with severity and evidence. Never call 911 yourself."
 )
 
@@ -41,6 +44,14 @@ ELDER_TOOLS: list[dict[str, Any]] = [
             "properties": {"text": {"type": "string"}},
             "required": ["text"],
         },
+    },
+    {
+        "name": "get_acoustic_evidence",
+        "description": (
+            "Return non-speech audio-scene tags (e.g. Thud, Screaming, Groan) "
+            "detected on the trigger clip and the latest check-in response."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
     },
     {
         "name": "listen_to_elder",
@@ -94,6 +105,9 @@ async def run_elder_agent(session: "ElderSession", llm: LLM) -> str:
             events = await p.memory.get_events(elder_id)
             return json.dumps(events)
 
+        if name == "get_acoustic_evidence":
+            return json.dumps(session.acoustic_evidence or {"note": "no audio analyzed"})
+
         if name == "speak_to_elder":
             text = args["text"]
             await session.begin_checkin_once()
@@ -109,7 +123,12 @@ async def run_elder_agent(session: "ElderSession", llm: LLM) -> str:
             audio_b64 = await session.await_audio_response(prompt_id)
             transcript = await p.voice.transcribe(audio_b64)
             session.last_transcript = transcript
-            return transcript
+            # Classify non-speech sounds in the response for the decision fusion.
+            scene = await p.audio_scene.classify(audio_b64)
+            session.acoustic_evidence["last_checkin"] = scene.to_dict()
+            return json.dumps(
+                {"transcript": transcript, "acoustic": scene.to_dict()}
+            )
 
         if name == "log_event":
             await p.memory.log_event(elder_id, args.get("event", {}))

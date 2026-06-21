@@ -39,9 +39,12 @@ class Settings(BaseSettings):
     twilio_from_number: str = ""
     twilio_caretaker_number: str = ""
 
-    # Message bus
+    # Message bus (BAND). REST URL is used for publish; WS URL is for streaming
+    # subscriptions; base_url (an app/project id) is kept for future use.
     band_api_key: str = ""
     band_base_url: str = ""
+    band_rest_url: str = ""
+    band_ws_url: str = ""
 
     # Sentry
     sentry_dsn: str = ""
@@ -78,7 +81,7 @@ class Settings(BaseSettings):
 
     @property
     def has_band(self) -> bool:
-        return bool(self.band_api_key and self.band_base_url)
+        return bool(self.band_api_key and self.band_rest_url)
 
     @property
     def has_sentry(self) -> bool:

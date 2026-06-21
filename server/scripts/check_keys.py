@@ -116,7 +116,7 @@ async def check_band() -> Check:
     c = Check("BAND (message bus)")
     if not settings.has_band:
         return c
-    base = settings.band_base_url.rstrip("/")
+    base = settings.band_rest_url.rstrip("/")
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             r = await client.get(

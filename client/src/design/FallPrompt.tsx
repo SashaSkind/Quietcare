@@ -87,7 +87,7 @@ export function FallPrompt({ question, countdown, onOk, onHelp }: FallPromptProp
 const styles = StyleSheet.create({
   overlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(4,16,22,0.62)',
+    backgroundColor: 'rgba(0,0,0,0.66)',
     alignItems: 'center',
     justifyContent: 'flex-end',
     padding: 20,
@@ -97,10 +97,10 @@ const styles = StyleSheet.create({
   card: {
     width: '100%',
     maxWidth: 460,
-    backgroundColor: 'rgba(12,38,48,0.96)',
+    backgroundColor: 'rgba(10,14,20,0.97)',
     borderRadius: 32,
     borderWidth: 1,
-    borderColor: 'rgba(94,234,212,0.25)',
+    borderColor: theme.accent,
     padding: 28,
     gap: 18,
     marginBottom: 12,
@@ -143,7 +143,7 @@ const styles = StyleSheet.create({
     width: '100%',
     height: 8,
     borderRadius: 4,
-    backgroundColor: 'rgba(94,234,212,0.15)',
+    backgroundColor: 'rgba(255,255,255,0.14)',
     overflow: 'hidden',
   },
   fill: { height: 8, borderRadius: 4, backgroundColor: theme.accent },

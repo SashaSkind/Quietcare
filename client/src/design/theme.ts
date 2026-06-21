@@ -1,28 +1,31 @@
 import type { Theme } from './types';
 
 // ============================================================================
-// DESIGN A — "Aurora"  (calm / medical-trust)
-// Soft gradient orb, slow breathing, muted teal + deep navy, large legible type.
-// Swapped per branch: design-b-pulse and design-c-halo override this file.
+// DESIGN B — "Pulse"  (high-contrast / accessible)
+// Bold, near-black canvas with a crisp concentric-ring orb, bright electric
+// accents, and oversized type/targets for elder legibility (per the styling
+// note: large text, simple controls, high contrast).
 // ============================================================================
 
-export const DESIGN_ID = 'aurora';
+export const DESIGN_ID = 'pulse';
 
 export const theme: Theme = {
-  name: 'Aurora',
-  tagline: 'Calm, clinical trust',
-  bg: '#0b1f2a',
-  bgUrgent: '#2a0f14',
-  orbIdle: ['rgba(45,212,191,0.10)', 'rgba(45,212,191,0.18)', 'rgba(94,234,212,0.30)', 'rgba(153,246,228,0.95)'],
-  orbListening: ['rgba(56,189,248,0.12)', 'rgba(56,189,248,0.22)', 'rgba(125,211,252,0.38)', 'rgba(186,230,253,0.98)'],
-  orbUrgent: ['rgba(248,113,113,0.12)', 'rgba(248,113,113,0.24)', 'rgba(252,165,165,0.42)', 'rgba(254,202,202,0.98)'],
-  textPrimary: '#f0fdfa',
-  textSecondary: '#7dd3c4',
-  ok: '#2dd4bf',
-  okText: '#04201b',
-  danger: '#f87171',
-  dangerText: '#2a0f14',
-  accent: '#5eead4',
+  name: 'Pulse',
+  tagline: 'High-contrast, accessible',
+  bg: '#000000',
+  bgUrgent: '#1a0000',
+  // For Pulse the orb is drawn as crisp rings; these arrays still feed the core
+  // gradient/glow fallback (outer -> inner).
+  orbIdle: ['rgba(34,211,238,0.06)', 'rgba(34,211,238,0.16)', 'rgba(34,211,238,0.45)', '#22d3ee'],
+  orbListening: ['rgba(163,230,53,0.08)', 'rgba(163,230,53,0.20)', 'rgba(163,230,53,0.55)', '#a3e635'],
+  orbUrgent: ['rgba(239,68,68,0.10)', 'rgba(239,68,68,0.28)', 'rgba(239,68,68,0.6)', '#ef4444'],
+  textPrimary: '#ffffff',
+  textSecondary: '#a3b3bd',
+  ok: '#22d3ee',
+  okText: '#001b20',
+  danger: '#ef4444',
+  dangerText: '#ffffff',
+  accent: '#22d3ee',
   fontFamily:
     '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
 };

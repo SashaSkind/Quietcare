@@ -4,10 +4,10 @@ import type { OrbMode } from './types';
 import { theme } from './theme';
 
 // ============================================================================
-// DESIGN A — "Aurora" orb
-// A soft, layered-glow sphere that slowly breathes when idle and pulses with
-// concentric listening rings during a check-in. Pure RN primitives so it can
-// be lifted straight into the native app.
+// DESIGN B — "Pulse" orb
+// A crisp, high-contrast core that breathes, surrounded by clean concentric
+// rings and outward-rippling pulse rings (staggered). No soft blur — bold,
+// legible structure. Pure RN primitives, adoptable into the native app.
 // ============================================================================
 
 interface OrbProps {
@@ -15,34 +15,27 @@ interface OrbProps {
   size?: number;
 }
 
-function colorsFor(mode: OrbMode): string[] {
-  if (mode === 'urgent') return theme.orbUrgent;
-  if (mode === 'listening') return theme.orbListening;
-  return theme.orbIdle;
+function accentFor(mode: OrbMode): string {
+  if (mode === 'urgent') return theme.orbUrgent[3];
+  if (mode === 'listening') return theme.orbListening[3];
+  return theme.orbIdle[3];
 }
+
+const RIPPLES = [0, 1, 2];
 
 export function Orb({ mode, size = 260 }: OrbProps) {
   const breathe = useRef(new Animated.Value(0)).current;
-  const ring = useRef(new Animated.Value(0)).current;
-  const colors = colorsFor(mode);
+  const ripples = useRef(RIPPLES.map(() => new Animated.Value(0))).current;
+  const accent = accentFor(mode);
   const active = mode === 'listening' || mode === 'urgent';
+  const core = size * 0.42;
 
   useEffect(() => {
-    const speed = active ? 1400 : 4200;
+    const speed = active ? 1100 : 3600;
     const loop = Animated.loop(
       Animated.sequence([
-        Animated.timing(breathe, {
-          toValue: 1,
-          duration: speed,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-        Animated.timing(breathe, {
-          toValue: 0,
-          duration: speed,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
+        Animated.timing(breathe, { toValue: 1, duration: speed, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        Animated.timing(breathe, { toValue: 0, duration: speed, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
       ]),
     );
     loop.start();
@@ -50,76 +43,67 @@ export function Orb({ mode, size = 260 }: OrbProps) {
   }, [active, breathe]);
 
   useEffect(() => {
-    if (!active) {
-      ring.setValue(0);
-      return;
-    }
-    const loop = Animated.loop(
-      Animated.timing(ring, {
-        toValue: 1,
-        duration: mode === 'urgent' ? 1100 : 1800,
-        easing: Easing.out(Easing.ease),
-        useNativeDriver: true,
-      }),
+    const period = mode === 'urgent' ? 1400 : 2200;
+    const loops = ripples.map((v, i) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay((period / RIPPLES.length) * i),
+          Animated.timing(v, { toValue: 1, duration: period, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+        ]),
+      ),
     );
-    loop.start();
-    return () => loop.stop();
-  }, [active, mode, ring]);
+    loops.forEach((l) => l.start());
+    return () => loops.forEach((l) => l.stop());
+  }, [mode, ripples]);
 
-  const coreScale = breathe.interpolate({
-    inputRange: [0, 1],
-    outputRange: active ? [0.94, 1.06] : [0.97, 1.03],
-  });
-  const ringScale = ring.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1.7] });
-  const ringOpacity = ring.interpolate({ inputRange: [0, 1], outputRange: [0.45, 0] });
+  const coreScale = breathe.interpolate({ inputRange: [0, 1], outputRange: active ? [0.9, 1.08] : [0.96, 1.04] });
 
   return (
     <View style={[styles.wrap, { width: size * 1.7, height: size * 1.7 }]}>
-      {active && (
+      {/* Static structural rings */}
+      {[1, 0.72].map((f, i) => (
+        <View
+          key={`s${i}`}
+          style={[styles.ringBase, { width: size * f, height: size * f, borderRadius: (size * f) / 2, borderColor: accent, opacity: 0.18 }]}
+        />
+      ))}
+      {/* Outward ripple rings */}
+      {ripples.map((v, i) => (
         <Animated.View
+          key={`r${i}`}
           style={[
-            styles.ring,
+            styles.ringBase,
             {
-              width: size,
-              height: size,
-              borderRadius: size / 2,
-              borderColor: colors[2],
-              transform: [{ scale: ringScale }],
-              opacity: ringOpacity,
+              width: size * 0.6,
+              height: size * 0.6,
+              borderRadius: size * 0.3,
+              borderColor: accent,
+              transform: [{ scale: v.interpolate({ inputRange: [0, 1], outputRange: [1, 2.4] }) }],
+              opacity: v.interpolate({ inputRange: [0, 1], outputRange: [0.6, 0] }),
             },
           ]}
         />
-      )}
-      {/* Glow layers, outer -> inner */}
-      {colors.map((c, i) => {
-        const layerSize = size * (1 - i * 0.2);
-        const isCore = i === colors.length - 1;
-        return (
-          <Animated.View
-            key={i}
-            style={[
-              styles.layer,
-              {
-                width: layerSize,
-                height: layerSize,
-                borderRadius: layerSize / 2,
-                backgroundColor: c,
-                transform: isCore ? [{ scale: coreScale }] : undefined,
-                ...({
-                  filter: isCore ? 'blur(0.5px)' : 'blur(10px)',
-                  boxShadow: isCore ? `0 0 ${size / 4}px ${c}` : undefined,
-                } as object),
-              },
-            ]}
-          />
-        );
-      })}
+      ))}
+      {/* Bold solid core */}
+      <Animated.View
+        style={[
+          styles.core,
+          {
+            width: core,
+            height: core,
+            borderRadius: core / 2,
+            backgroundColor: accent,
+            transform: [{ scale: coreScale }],
+            ...({ boxShadow: `0 0 ${size / 3}px ${accent}` } as object),
+          },
+        ]}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   wrap: { alignItems: 'center', justifyContent: 'center' },
-  layer: { position: 'absolute', alignItems: 'center', justifyContent: 'center' },
-  ring: { position: 'absolute', borderWidth: 2 },
+  ringBase: { position: 'absolute', borderWidth: 3 },
+  core: { position: 'absolute' },
 });

@@ -17,7 +17,11 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.config import Settings
-from app.providers.audio_scene import MockAudioScene
+from app.providers.audio_scene import (
+    AudioSceneResult,
+    EnsembleAudioScene,
+    MockAudioScene,
+)
 from app.providers.bus import InProcessBus
 from app.providers.factory import Providers, _build_audio_scene
 from app.providers.llm import MockLLM
@@ -61,12 +65,61 @@ class TestFactorySelection(unittest.TestCase):
         s = Settings(_env_file=None)
         self.assertEqual(_build_audio_scene(s).name, "mock")
 
+    def test_explicit_mock_backend(self):
+        s = Settings(_env_file=None, audio_scene_backend="mock")
+        self.assertEqual(_build_audio_scene(s).name, "mock")
+
+    def test_yamnet_backend_falls_back_to_mock_without_model(self):
+        s = Settings(_env_file=None, audio_scene_backend="yamnet")
+        self.assertEqual(_build_audio_scene(s).name, "mock")
+
+    def test_both_backend_falls_back_to_mock_when_none_available(self):
+        # No YAMNet model configured and PANNs deps absent in test env -> mock.
+        s = Settings(_env_file=None, audio_scene_backend="both")
+        self.assertEqual(_build_audio_scene(s).name, "mock")
+
     def test_summary_includes_audio_scene(self):
         providers = Providers(
             llm=MockLLM(), voice=MockVoice(), memory=MockMemory(),
             telephony=MockTelephony(), bus=InProcessBus(),
         )
         self.assertEqual(providers.summary()["audio_scene"], "mock")
+
+
+class _StubScene:
+    """Minimal AudioScene stub returning a fixed result for ensemble tests."""
+
+    def __init__(self, name, tags, distress):
+        self.name = name
+        self._result = AudioSceneResult(tags=tags, distress=distress, source=name)
+
+    async def classify(self, audio_b64):
+        return self._result
+
+
+class TestEnsembleAudioScene(unittest.IsolatedAsyncioTestCase):
+    async def test_merges_tags_by_max_score_and_ors_distress(self):
+        a = _StubScene("yamnet", [("Thud", 0.4), ("Speech", 0.7)], distress=False)
+        b = _StubScene("panns", [("Thud", 0.9), ("Groan", 0.6)], distress=True)
+        ens = EnsembleAudioScene([a, b])
+        self.assertEqual(ens.name, "ensemble(yamnet+panns)")
+        res = await ens.classify("x")
+        tag_map = dict(res.tags)
+        self.assertEqual(tag_map["Thud"], 0.9)  # max across backends
+        self.assertIn("Groan", tag_map)
+        self.assertIn("Speech", tag_map)
+        self.assertTrue(res.distress)  # OR of members
+        self.assertEqual(res.source, "yamnet+panns")
+
+    async def test_distress_false_when_no_member_flags(self):
+        a = _StubScene("yamnet", [("Speech", 0.8)], distress=False)
+        b = _StubScene("panns", [("Music", 0.5)], distress=False)
+        res = await EnsembleAudioScene([a, b]).classify("x")
+        self.assertFalse(res.distress)
+
+    async def test_requires_at_least_one_member(self):
+        with self.assertRaises(ValueError):
+            EnsembleAudioScene([])
 
 
 class AutoRespondWS:
@@ -129,6 +182,33 @@ class TestYamnetLive(unittest.IsolatedAsyncioTestCase):
             wav_b64 = await DeepgramVoice(s.deepgram_api_key).synthesize("hello there")
             res = await scene.classify(wav_b64)
             self.assertEqual(res.source, "yamnet")
+            self.assertTrue(len(res.tags) > 0)
+
+
+def _panns_available() -> bool:
+    try:
+        import panns_inference  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
+@unittest.skipUnless(
+    os.environ.get("RUN_LIVE_TESTS") == "1" and _panns_available(),
+    "live PANNs disabled (set RUN_LIVE_TESTS=1 + pip install panns-inference torch)",
+)
+class TestPannsLive(unittest.IsolatedAsyncioTestCase):
+    async def test_classifies_real_wav(self):
+        from app.providers.audio_scene import PannsAudioScene
+        from app.providers.voice import DeepgramVoice
+
+        s = Settings()
+        scene = PannsAudioScene(s.panns_checkpoint_path)
+        if s.has_deepgram:
+            wav_b64 = await DeepgramVoice(s.deepgram_api_key).synthesize("hello there")
+            res = await scene.classify(wav_b64)
+            self.assertEqual(res.source, "panns")
             self.assertTrue(len(res.tags) > 0)
 
 

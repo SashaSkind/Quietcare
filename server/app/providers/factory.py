@@ -6,7 +6,13 @@ import logging
 from dataclasses import dataclass, field
 
 from ..config import Settings
-from .audio_scene import AudioScene, MockAudioScene, YamnetAudioScene
+from .audio_scene import (
+    AudioScene,
+    EnsembleAudioScene,
+    MockAudioScene,
+    PannsAudioScene,
+    YamnetAudioScene,
+)
 from .bus import BandBus, InProcessBus, MessageBus
 from .llm import LLM, AnthropicLLM, MockLLM
 from .memory import Memory, MockMemory, RedisMemory
@@ -104,15 +110,52 @@ def _build_bus(s: Settings) -> MessageBus:
     return InProcessBus()
 
 
+def _try_yamnet(s: Settings) -> AudioScene | None:
+    if not s.has_yamnet:
+        return None
+    try:
+        scene = YamnetAudioScene(s.yamnet_model_path, s.yamnet_labels_path)
+        logger.info("audio_scene: YAMNet model loaded")
+        return scene
+    except Exception as exc:
+        logger.warning("YAMNet init failed (%s)", exc)
+        return None
+
+
+def _try_panns(s: Settings) -> AudioScene | None:
+    try:
+        scene = PannsAudioScene(s.panns_checkpoint_path)
+        logger.info("audio_scene: PANNs (CNN14) model loaded")
+        return scene
+    except Exception as exc:
+        logger.warning("PANNs init failed (%s)", exc)
+        return None
+
+
 def _build_audio_scene(s: Settings) -> AudioScene:
-    if s.has_yamnet:
-        try:
-            scene = YamnetAudioScene(s.yamnet_model_path, s.yamnet_labels_path)
-            logger.info("audio_scene: YAMNet model loaded")
-            return scene
-        except Exception as exc:
-            logger.warning("YAMNet init failed (%s); using mock audio scene", exc)
-    return MockAudioScene()
+    """Select the audio-scene backend per ``audio_scene_backend``. Any backend
+    that can't initialize gracefully degrades (ultimately to the mock)."""
+    backend = (s.audio_scene_backend or "auto").lower()
+
+    if backend == "mock":
+        return MockAudioScene()
+
+    if backend == "yamnet":
+        return _try_yamnet(s) or MockAudioScene()
+
+    if backend == "panns":
+        return _try_panns(s) or MockAudioScene()
+
+    if backend == "both":
+        members = [m for m in (_try_yamnet(s), _try_panns(s)) if m is not None]
+        if len(members) > 1:
+            return EnsembleAudioScene(members)
+        if len(members) == 1:
+            return members[0]
+        return MockAudioScene()
+
+    # "auto" (default): prefer YAMNet if configured; never auto-load heavy PANNs.
+    return _try_yamnet(s) or MockAudioScene()
 
 
 def build_providers(s: Settings) -> Providers:

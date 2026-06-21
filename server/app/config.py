@@ -30,11 +30,20 @@ class Settings(BaseSettings):
     # Voice
     deepgram_api_key: str = ""
 
-    # Audio-scene ML (YAMNet/AudioSet distress detection). Both paths must point
-    # at a local YAMNet .tflite model and its class-map CSV; when unset, a
-    # deterministic mock derives distress tags from scenario hints.
+    # Audio-scene ML (AudioSet distress detection). Two backends are available:
+    #   - YAMNet  (TFLite, light): set yamnet_model_path + yamnet_labels_path.
+    #   - PANNs   (CNN14, heavy):  pip install panns-inference torch; the ~300MB
+    #               checkpoint auto-downloads (or set panns_checkpoint_path).
+    # audio_scene_backend selects which to use:
+    #   auto    -> YAMNet if configured, else mock (PANNs never auto: it's heavy)
+    #   yamnet  -> YAMNet (falls back to mock if unavailable)
+    #   panns   -> PANNs  (falls back to mock if unavailable)
+    #   both    -> ensemble of whichever are available (falls back to mock)
+    #   mock    -> always the deterministic mock
+    audio_scene_backend: str = "auto"
     yamnet_model_path: str = ""
     yamnet_labels_path: str = ""
+    panns_checkpoint_path: str = ""
 
     # Memory
     redis_url: str = ""

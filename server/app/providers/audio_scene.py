@@ -12,6 +12,7 @@ testable with zero ML dependencies.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 from abc import ABC, abstractmethod
@@ -48,6 +49,38 @@ class AudioSceneResult:
 def _is_distress(label: str) -> bool:
     low = label.lower()
     return any(key in low for key in DISTRESS_LABELS)
+
+
+def _decode_wav_mono(audio_b64: str, target_rate: int):
+    """Decode a base64 WAV into a mono float32 waveform resampled to
+    ``target_rate`` (linear interpolation). Shared by YAMNet (16 kHz) and PANNs
+    (32 kHz). numpy is imported lazily so the mock path needs no ML deps."""
+    import io
+    import wave
+
+    import numpy as np
+
+    raw = base64.b64decode(audio_b64)
+    with wave.open(io.BytesIO(raw), "rb") as wf:
+        n_channels = wf.getnchannels()
+        sample_rate = wf.getframerate()
+        sampwidth = wf.getsampwidth()
+        frames = wf.readframes(wf.getnframes())
+
+    dtype = {1: np.int8, 2: np.int16, 4: np.int32}.get(sampwidth, np.int16)
+    data = np.frombuffer(frames, dtype=dtype).astype(np.float32)
+    if n_channels > 1:
+        data = data.reshape(-1, n_channels).mean(axis=1)
+    max_val = float(np.iinfo(dtype).max) if dtype != np.float32 else 1.0
+    data = data / max_val
+    if sample_rate != target_rate and len(data) > 1:
+        target_len = int(round(len(data) * target_rate / sample_rate))
+        data = np.interp(
+            np.linspace(0, len(data) - 1, target_len),
+            np.arange(len(data)),
+            data,
+        ).astype(np.float32)
+    return data
 
 
 class AudioScene(ABC):
@@ -148,44 +181,13 @@ class YamnetAudioScene(AudioScene):
                     labels.append(row[name_idx])
         return labels
 
-    @staticmethod
-    def _decode_wav_to_16k_mono(audio_b64: str):
-        import io
-        import wave
-
-        import numpy as np
-
-        raw = base64.b64decode(audio_b64)
-        with wave.open(io.BytesIO(raw), "rb") as wf:
-            n_channels = wf.getnchannels()
-            sample_rate = wf.getframerate()
-            sampwidth = wf.getsampwidth()
-            frames = wf.readframes(wf.getnframes())
-
-        dtype = {1: np.int8, 2: np.int16, 4: np.int32}.get(sampwidth, np.int16)
-        data = np.frombuffer(frames, dtype=dtype).astype(np.float32)
-        if n_channels > 1:
-            data = data.reshape(-1, n_channels).mean(axis=1)
-        # Normalize to [-1, 1].
-        max_val = float(np.iinfo(dtype).max) if dtype != np.float32 else 1.0
-        data = data / max_val
-        # Resample to 16 kHz via linear interpolation.
-        if sample_rate != 16000 and len(data) > 1:
-            target_len = int(round(len(data) * 16000 / sample_rate))
-            data = np.interp(
-                np.linspace(0, len(data) - 1, target_len),
-                np.arange(len(data)),
-                data,
-            ).astype(np.float32)
-        return data
-
     async def classify(self, audio_b64: str | None) -> AudioSceneResult:
         if not audio_b64:
             return AudioSceneResult(source="yamnet")
         try:
             import numpy as np
 
-            waveform = self._decode_wav_to_16k_mono(audio_b64)
+            waveform = _decode_wav_mono(audio_b64, 16000)
             if waveform.size == 0:
                 return AudioSceneResult(source="yamnet")
             # YAMNet accepts a 1-D float32 waveform; resize the input tensor.
@@ -207,3 +209,82 @@ class YamnetAudioScene(AudioScene):
         except Exception as exc:  # pragma: no cover - model/runtime issues
             logger.warning("YAMNet classify failed (%s)", exc)
             return AudioSceneResult(source="yamnet")
+
+
+class PannsAudioScene(AudioScene):
+    """PANNs CNN14 (AudioSet, 527 classes) audio tagging via panns_inference.
+
+    Heavier than YAMNet (PyTorch + a ~300 MB checkpoint that auto-downloads on
+    first use) but typically stronger. Expects 32 kHz mono audio. All heavy deps
+    are imported lazily so the rest of the system needs none of them.
+    """
+
+    name = "panns"
+
+    def __init__(self, checkpoint_path: str = "", device: str = "cpu") -> None:
+        from panns_inference import AudioTagging, labels  # type: ignore
+
+        # checkpoint_path="" lets panns_inference download/use its default Cnn14.
+        self._model = AudioTagging(
+            checkpoint_path=checkpoint_path or None, device=device
+        )
+        self._labels = list(labels)
+
+    async def classify(self, audio_b64: str | None) -> AudioSceneResult:
+        if not audio_b64:
+            return AudioSceneResult(source="panns")
+        try:
+            import numpy as np
+
+            waveform = _decode_wav_mono(audio_b64, 32000)
+            if waveform.size == 0:
+                return AudioSceneResult(source="panns")
+            # panns_inference expects shape (batch, samples); inference is sync
+            # and CPU-bound, so run it off the event loop.
+            batch = waveform[None, :]
+
+            def _infer():
+                clipwise, _ = self._model.inference(batch)
+                return clipwise[0]
+
+            scores = await asyncio.to_thread(_infer)
+            top_idx = np.argsort(scores)[::-1][:10]
+            tags = [(self._labels[i], float(scores[i])) for i in top_idx]
+            distress = any(
+                _is_distress(l) and s >= DISTRESS_THRESHOLD for l, s in tags
+            )
+            return AudioSceneResult(tags=tags[:6], distress=distress, source="panns")
+        except Exception as exc:  # pragma: no cover - model/runtime issues
+            logger.warning("PANNs classify failed (%s)", exc)
+            return AudioSceneResult(source="panns")
+
+
+class EnsembleAudioScene(AudioScene):
+    """Runs several AudioScene backends in parallel and merges their results.
+
+    Tags are merged by taking the max score per label across backends (then the
+    top few are kept); ``distress`` is the logical OR of the members (a
+    safety-biased union, so either model can raise the flag).
+    """
+
+    name = "ensemble"
+
+    def __init__(self, members: list[AudioScene]) -> None:
+        if not members:
+            raise ValueError("EnsembleAudioScene requires at least one member")
+        self._members = members
+        self.name = "ensemble(" + "+".join(m.name for m in members) + ")"
+
+    async def classify(self, audio_b64: str | None) -> AudioSceneResult:
+        results = await asyncio.gather(
+            *(m.classify(audio_b64) for m in self._members)
+        )
+        merged: dict[str, float] = {}
+        for r in results:
+            for label, score in r.tags:
+                if score > merged.get(label, 0.0):
+                    merged[label] = score
+        tags = sorted(merged.items(), key=lambda kv: kv[1], reverse=True)[:6]
+        distress = any(r.distress for r in results)
+        source = "+".join(r.source for r in results)
+        return AudioSceneResult(tags=tags, distress=distress, source=source)

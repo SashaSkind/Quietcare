@@ -187,6 +187,19 @@ async def get_elder_events(
     return {"elder_id": elder_id, "count": len(events), "events": events}
 
 
+@app.get("/elders/{elder_id}/summary")
+async def get_elder_summary(
+    elder_id: str, question: str = "How is she doing today?"
+) -> dict[str, object]:
+    """Natural-language "warm update" for the caretaker — the same recap the
+    inbound-SMS channel sends, exposed for dashboards/apps. Read-only."""
+    providers = app.state.providers
+    if await providers.memory.get_profile(elder_id) is None:
+        raise HTTPException(status_code=404, detail="elder not found")
+    summary = await summarize_for_caretaker(providers, elder_id, question)
+    return {"elder_id": elder_id, "question": question, "summary": summary}
+
+
 def _twiml(message: str) -> Response:
     """Build a TwiML SMS reply (Twilio sends `message` back to the texter)."""
     escaped = (

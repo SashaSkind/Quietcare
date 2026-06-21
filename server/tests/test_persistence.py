@@ -129,6 +129,23 @@ class TestHistoryEndpoint(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["count"], 0)
 
+    def test_summary_endpoint_returns_natural_language(self):
+        resp = self.client.get("/elders/margaret-01/summary")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body["elder_id"], "margaret-01")
+        self.assertTrue(len(body["summary"]) > 0)
+
+    def test_summary_accepts_custom_question(self):
+        resp = self.client.get(
+            "/elders/margaret-01/summary", params={"question": "any falls today?"}
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["question"], "any falls today?")
+
+    def test_summary_unknown_elder_404(self):
+        self.assertEqual(self.client.get("/elders/ghost/summary").status_code, 404)
+
 
 if __name__ == "__main__":
     unittest.main()

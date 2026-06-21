@@ -36,6 +36,16 @@ logger = logging.getLogger("quietcare.main")
 async def lifespan(app: FastAPI):
     init_sentry()
     providers = build_providers(settings)
+
+    # Seed elder profile into real Redis if it's empty (no-op for mock memory,
+    # which seeds itself; idempotent for Redis via seed()'s existence check).
+    seed = getattr(providers.memory, "seed", None)
+    if seed is not None:
+        try:
+            await seed()
+        except Exception as exc:  # pragma: no cover - external store
+            logger.warning("memory seed failed (%s); continuing", exc)
+
     registry = SessionRegistry()
     caretaker = CaretakerService(providers, registry)
     caretaker.attach()

@@ -52,7 +52,14 @@ class AnthropicLLM(LLM):
     def __init__(self, api_key: str, base_url: str, model: str) -> None:
         from anthropic import AsyncAnthropic  # lazy import
 
-        self._client = AsyncAnthropic(api_key=api_key, base_url=base_url)
+        # The Anthropic SDK appends "/v1/messages" to base_url. Some gateways
+        # (e.g. PaleBlueDot/TokenRouter) are configured with a trailing "/v1",
+        # which would yield an invalid "/v1/v1/messages". Normalize it away so
+        # either form works.
+        normalized = base_url.rstrip("/")
+        if normalized.endswith("/v1"):
+            normalized = normalized[: -len("/v1")]
+        self._client = AsyncAnthropic(api_key=api_key, base_url=normalized)
         self._model = model
 
     async def run(

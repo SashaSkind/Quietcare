@@ -34,6 +34,21 @@ class Providers:
 
 
 def _build_llm(s: Settings) -> LLM:
+    # Prefer PaleBlueDot TokenRouter (Anthropic-compatible gateway serving
+    # Claude). The same Anthropic SDK client is pointed at PBD's base URL, so
+    # tool-use / function-calling passes through unchanged.
+    if s.has_palebluedot:
+        try:
+            llm = AnthropicLLM(
+                s.palebluedot_api_key, s.palebluedot_base_url, s.anthropic_model
+            )
+            llm.name = "palebluedot"
+            logger.info("LLM: routing Claude via PaleBlueDot TokenRouter")
+            return llm
+        except Exception as exc:  # missing sdk or bad config
+            logger.warning(
+                "PaleBlueDot init failed (%s); falling back to direct Anthropic", exc
+            )
     if s.has_anthropic:
         try:
             return AnthropicLLM(s.anthropic_api_key, s.anthropic_base_url, s.anthropic_model)

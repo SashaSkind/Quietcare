@@ -15,10 +15,17 @@ class Settings(BaseSettings):
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )
 
-    # LLM
+    # LLM (direct Anthropic)
     anthropic_api_key: str = ""
     anthropic_base_url: str = "https://api.anthropic.com"
     anthropic_model: str = "claude-sonnet-4-6"
+
+    # LLM (PaleBlueDot TokenRouter — Anthropic-compatible gateway serving Claude
+    # with free credits). When the key is set, the LLM is routed through PBD; the
+    # direct Anthropic key is used as a fallback. The base URL must be the PBD
+    # endpoint the Anthropic SDK appends /v1/messages to.
+    palebluedot_api_key: str = ""
+    palebluedot_base_url: str = ""
 
     # Voice
     deepgram_api_key: str = ""
@@ -47,6 +54,10 @@ class Settings(BaseSettings):
     @property
     def has_anthropic(self) -> bool:
         return bool(self.anthropic_api_key)
+
+    @property
+    def has_palebluedot(self) -> bool:
+        return bool(self.palebluedot_api_key and self.palebluedot_base_url)
 
     @property
     def has_deepgram(self) -> bool:

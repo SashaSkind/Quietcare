@@ -116,16 +116,17 @@ async def check_band() -> Check:
     c = Check("BAND (message bus)")
     if not settings.has_band:
         return c
-    base = settings.band_rest_url.rstrip("/")
+    base = (settings.band_rest_url or "https://app.band.ai").rstrip("/")
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
+        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
             r = await client.get(
-                base,
-                headers={"Authorization": f"Bearer {settings.band_api_key}"},
+                f"{base}/api/v1/agent/me",
+                headers={"X-API-Key": settings.band_api_key},
             )
-        # Any HTTP response (even 401/404) proves the host is reachable; auth
-        # semantics vary per BAND deployment.
-        return c.ok(f"endpoint reachable (HTTP {r.status_code})")
+        if r.status_code == 200:
+            handle = r.json().get("data", {}).get("handle", "?")
+            return c.ok(f"authenticated as {handle}")
+        return c.fail(f"auth failed (HTTP {r.status_code})")
     except Exception as exc:
         return c.fail(repr(exc)[:120])
 

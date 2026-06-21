@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     band_rest_url: str = ""
     band_ws_url: str = ""
 
+    # Emergency dispatch (gated 911 path). NEVER set this to a real PSAP/911
+    # line in a demo; use a safe test number you control. When unset, emergency
+    # dispatch is logged only (mocked), even with real Twilio.
+    emergency_number: str = ""
+
     # Sentry
     sentry_dsn: str = ""
 

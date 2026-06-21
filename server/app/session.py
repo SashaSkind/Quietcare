@@ -160,9 +160,15 @@ async def handle_trigger(session: ElderSession, trigger: TriggerMessage) -> None
 class CaretakerService:
     """Subscribes to the bus and runs the caretaker-agent per escalation."""
 
-    def __init__(self, providers: Providers, registry: SessionRegistry) -> None:
+    def __init__(
+        self,
+        providers: Providers,
+        registry: SessionRegistry,
+        confirmations: Any = None,
+    ) -> None:
         self.providers = providers
         self.registry = registry
+        self.confirmations = confirmations
         self.last_result: Optional[str] = None
 
     def attach(self) -> None:
@@ -179,5 +185,37 @@ class CaretakerService:
             logger.warning("caretaker: no session for %s", elder_id)
             return
         logger.info("caretaker-agent handling: %s", json.dumps(msg))
-        self.last_result = await run_caretaker_agent(session, self.providers.llm, msg)
+        self.last_result = await run_caretaker_agent(
+            session, self.providers.llm, msg, self.confirmations
+        )
         logger.info("caretaker-agent done: %s", self.last_result)
+
+
+async def confirm_911(
+    *,
+    registry: SessionRegistry,
+    confirmations: Any,
+    providers: Providers,
+    elder_id: str,
+    token: str,
+    approve: bool,
+) -> dict[str, Any]:
+    """Resolve a human 911 authorization. On approval, gate the FSM and dispatch
+    the (configurable, mock-by-default) emergency call. Raises on bad token /
+    missing request so the caller can return the right HTTP status."""
+    pc = confirmations.resolve(elder_id, token, approve)  # KeyError/Perm/Value
+    if not approve:
+        logger.info("911 authorization REJECTED for %s", elder_id)
+        return {"status": "rejected", "elder_id": elder_id}
+
+    session = registry.get(elder_id)
+    if session is not None:
+        session.fsm.gate_911(human_confirmed=True)
+        await session.send_status()
+    res = await providers.telephony.dispatch_emergency(pc.summary or pc.reason)
+    logger.info("911 authorization CONFIRMED for %s; dispatch=%s", elder_id, res.detail)
+    return {
+        "status": "confirmed",
+        "elder_id": elder_id,
+        "dispatch": {"ok": res.ok, "mocked": res.mocked, "detail": res.detail},
+    }

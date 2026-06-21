@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 from ..providers.llm import LLM
 from .base import run_agent
 
 if TYPE_CHECKING:
+    from ..confirmations import ConfirmationRegistry
     from ..session import ElderSession
 
 CARETAKER_SYSTEM = (
@@ -16,9 +17,12 @@ CARETAKER_SYSTEM = (
     "elder-agent over a message bus. Pull the elder's profile, triage the "
     "severity, and on a real emergency notify the human caretaker via SMS "
     "(send_caretaker_sms) and, for high severity, a voice call "
-    "(call_caretaker_voice). You may book a follow-up task. You must NEVER call "
-    "escalate_911 autonomously — it is gated and requires explicit human "
-    "confirmation."
+    "(call_caretaker_voice). You may book a follow-up task. If the situation "
+    "appears life-threatening and may warrant emergency services, call "
+    "request_911_confirmation — this alerts a human to AUTHORIZE the call; it "
+    "does NOT dial emergency services itself. You must NEVER call escalate_911 "
+    "autonomously — it is hard-gated and requires explicit human confirmation "
+    "delivered out-of-band."
 )
 
 CARETAKER_TOOLS: list[dict[str, Any]] = [
@@ -55,6 +59,19 @@ CARETAKER_TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "request_911_confirmation",
+        "description": (
+            "Request human authorization to call emergency services. Alerts the "
+            "caretaker with a one-time confirmation link/token. Does NOT dial "
+            "911 itself — a human must approve out-of-band."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {"reason": {"type": "string"}},
+            "required": ["reason"],
+        },
+    },
+    {
         "name": "escalate_911",
         "description": (
             "GATED. Initiate a 911 escalation. Requires human_confirmed=true; "
@@ -73,7 +90,10 @@ CARETAKER_TOOLS: list[dict[str, Any]] = [
 
 
 async def run_caretaker_agent(
-    session: "ElderSession", llm: LLM, msg: dict[str, Any]
+    session: "ElderSession",
+    llm: LLM,
+    msg: dict[str, Any],
+    confirmations: "Optional[ConfirmationRegistry]" = None,
 ) -> str:
     p = session.providers
     elder_id = session.elder_id
@@ -95,6 +115,25 @@ async def run_caretaker_agent(
 
         if name == "book_task":
             return f"task booked (stub): {json.dumps(args.get('task', {}))}"
+
+        if name == "request_911_confirmation":
+            reason = args.get("reason", "")
+            if confirmations is None:
+                return "confirmation channel unavailable; cannot request 911"
+            summary = msg.get("summary", "")
+            # Ensure the FSM is in the notified state so a later human approval
+            # can legally transition to the gated 911 state.
+            session.caretaker_notified_once()
+            pc = confirmations.create(elder_id, reason, summary)
+            await p.telephony.send_sms(
+                f"URGENT: Quietcare may need emergency services for {elder_id}. "
+                f"Reason: {reason}. To AUTHORIZE, confirm at "
+                f"/incidents/{elder_id}/confirm_911 with token {pc.token}."
+            )
+            return (
+                "human authorization requested (pending). Emergency services will "
+                "NOT be contacted until a human approves."
+            )
 
         if name == "escalate_911":
             # Hard gate enforced in the state machine.

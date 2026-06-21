@@ -83,6 +83,7 @@ def _build_telephony(s: Settings) -> Telephony:
                 s.twilio_auth_token,
                 s.twilio_from_number,
                 s.twilio_caretaker_number,
+                s.emergency_number,
             )
         except Exception as exc:
             logger.warning("Twilio init failed (%s); using mock telephony", exc)

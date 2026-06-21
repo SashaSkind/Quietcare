@@ -7,9 +7,11 @@ import json
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel
 
 from .config import settings
+from .confirmations import ConfirmationRegistry
 from .protocol import (
     AudioResponseMessage,
     RegisterMessage,
@@ -22,6 +24,7 @@ from .session import (
     CaretakerService,
     ElderSession,
     SessionRegistry,
+    confirm_911,
     handle_trigger,
 )
 
@@ -47,11 +50,13 @@ async def lifespan(app: FastAPI):
             logger.warning("memory seed failed (%s); continuing", exc)
 
     registry = SessionRegistry()
-    caretaker = CaretakerService(providers, registry)
+    confirmations = ConfirmationRegistry()
+    caretaker = CaretakerService(providers, registry, confirmations)
     caretaker.attach()
 
     app.state.providers = providers
     app.state.registry = registry
+    app.state.confirmations = confirmations
     app.state.caretaker = caretaker
     app.state.bg_tasks = set()
     logger.info("Quietcare backend up. providers=%s", providers.summary())
@@ -69,6 +74,42 @@ async def health() -> dict[str, object]:
         "status": "ok",
         "providers": providers.summary() if providers else {},
     }
+
+
+class Confirm911Request(BaseModel):
+    token: str
+    approve: bool = True
+
+
+@app.get("/incidents/{elder_id}/confirmation")
+async def get_confirmation(elder_id: str) -> dict[str, object]:
+    """Return the pending 911 confirmation status for an elder (no token)."""
+    confirmations: ConfirmationRegistry = app.state.confirmations
+    pc = confirmations.get(elder_id)
+    if pc is None:
+        raise HTTPException(status_code=404, detail="no confirmation for elder")
+    return {"elder_id": elder_id, "status": pc.status, "reason": pc.reason}
+
+
+@app.post("/incidents/{elder_id}/confirm_911")
+async def post_confirm_911(elder_id: str, body: Confirm911Request) -> dict[str, object]:
+    """Human approves/rejects emergency dispatch. The hard gate (token + FSM)
+    is enforced inside confirm_911."""
+    try:
+        return await confirm_911(
+            registry=app.state.registry,
+            confirmations=app.state.confirmations,
+            providers=app.state.providers,
+            elder_id=elder_id,
+            token=body.token,
+            approve=body.approve,
+        )
+    except KeyError:
+        raise HTTPException(status_code=404, detail="no pending confirmation")
+    except PermissionError:
+        raise HTTPException(status_code=403, detail="invalid confirmation token")
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 def _spawn(coro) -> None:

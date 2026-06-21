@@ -41,7 +41,15 @@ All already implemented in `server/app/main.py`:
 | Pending 911 confirm | `GET /incidents/{id}/confirmation` |
 | Approve/reject 911 | `POST /incidents/{id}/confirm_911` |
 | Create resident | `POST /elders` (admin) |
+| Live integration status | `GET /health` (real vs mock per provider) |
+| MCP security scan | `POST /admin/security-scan` (admin, ArmorIQ) |
 | Live updates | `WS /ws` (status/incident stream, future) |
+
+> **Refill is a real computer-use action.** `POST /elders/{id}/refill` hands the
+> task to Browserbase + Playwright and returns a `task` object with
+> `replay_url`, `session_id`, and `detail`. The UI should surface the
+> `replay_url` as a "Watch the agent" link so caretakers (and judges) can see
+> the automation recording. The same provider also handles add-to-cart errands.
 
 ## Screens
 
@@ -54,7 +62,8 @@ All already implemented in `server/app/main.py`:
 ### 2. Resident detail (`/elders/:id`)
 Tabs:
 - **Today** — warm recap (`/summary`), latest incident, status pill, quick
-  actions: **Call me** (`/call-bridge`), **Send recap**, **Refill**.
+  actions: **Call me** (`/call-bridge`), **Send recap**, **Refill** (on success,
+  reveal a "Watch the agent" link to the Browserbase `replay_url`).
 - **Wellness** — `/wellness` summary sentence + Recharts trend (incidents,
   check-ins, activity) over a 7/30-day toggle.
 - **Medications** — schedule editor (`GET`/`PUT /medications`), adherence ring
@@ -73,6 +82,21 @@ Tabs:
 - Create a resident (`POST /elders`), capture caretaker name/phone, set the
   geofence home anchor + radius, and define the medication schedule.
 
+### 5. Trust & integrations (admin / footer)
+- **Live integration status** from `GET /health`: a small badge row showing
+  which providers are real vs mock (LLM, voice, memory, telephony, bus,
+  audio-scene, browser, security scan). Great for proving the sponsors are wired
+  live during a demo.
+- **MCP security posture**: a "Run security scan" admin action
+  (`POST /admin/security-scan`) that displays ArmorIQ's `vulnerability_score` +
+  `severity_level` for a scanned MCP endpoint.
+
+## Observability (developer-facing, not in the caretaker UI)
+- The backend exports OpenTelemetry traces of the agent tool-use loop and every
+  Claude call to **Arize AX** (project `quietcare`) when `ARIZE_*` keys are set.
+  This is a dev/judge artifact, not a dashboard screen — link to the Arize
+  project from the README/demo notes rather than the UI.
+
 ## Real-time strategy
 
 - Phase 1: TanStack Query polling (overview every 15s, detail every 5s, pending
@@ -85,7 +109,8 @@ Tabs:
 
 - `StatusPill`, `AdherenceRing`, `WellnessChart`, `EventTimeline`,
   `MedicationScheduleEditor`, `EmergencyConfirmModal`, `QuickActionBar`,
-  `ResidentCard`.
+  `ResidentCard`, `AgentReplayLink` (Browserbase `replay_url`),
+  `IntegrationStatusBar` (`/health`), `SecurityScanCard` (ArmorIQ).
 
 ## Accessibility & tone
 

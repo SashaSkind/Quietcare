@@ -98,6 +98,14 @@ class Settings(BaseSettings):
     night_start_hour: int = 22
     night_end_hour: int = 6
 
+    # Arize AX observability: OpenTelemetry traces of the LLM tool-use loop are
+    # exported to Arize via arize-otel + OpenInference auto-instrumentation. When
+    # space_id + api_key are set, tracing is enabled; otherwise it's a no-op.
+    # arize_project_name groups traces in the Arize UI.
+    arize_space_id: str = ""
+    arize_api_key: str = ""
+    arize_project_name: str = "quietcare"
+
     # Sentry
     sentry_dsn: str = ""
 
@@ -172,6 +180,10 @@ class Settings(BaseSettings):
     @property
     def has_sentry(self) -> bool:
         return bool(self.sentry_dsn)
+
+    @property
+    def has_arize(self) -> bool:
+        return bool(self.arize_space_id and self.arize_api_key)
 
 
 settings = Settings()

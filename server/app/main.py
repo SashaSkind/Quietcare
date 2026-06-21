@@ -33,6 +33,7 @@ from .medications import (
     adherence_summary,
     run_medication_reminder,
 )
+from .observability import init_tracing
 from .wellness import summarize_wellness
 from .protocol import (
     AudioResponseMessage,
@@ -60,6 +61,9 @@ logger = logging.getLogger("quietcare.main")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_sentry()
+    # Enable Arize tracing before the Anthropic client is constructed so the
+    # OpenInference instrumentation patches are in place for all LLM calls.
+    init_tracing()
     providers = build_providers(settings)
 
     # Seed elder profile into real Redis if it's empty (no-op for mock memory,

@@ -14,6 +14,11 @@ kagglehub>=0.3  # used by scripts/fetch_yamnet.py to pull the YAMNet TFLite mode
 # the session's CDP URL). Optional — without it, refill is session-only.
 # After install run:  python -m playwright install chromium
 playwright>=1.40
+# Arize AX observability: OpenTelemetry traces of the agent tool-use loop +
+# OpenInference auto-instrumentation of the Anthropic SDK. Optional — without
+# these (or without ARIZE_SPACE_ID/ARIZE_API_KEY) tracing is a no-op.
+arize-otel>=0.7
+openinference-instrumentation-anthropic>=0.1
 # PANNs CNN14 audio-scene backend (heavy: pulls torch). Optional — only needed
 # when AUDIO_SCENE_BACKEND=panns or both.
 panns-inference>=0.1.1

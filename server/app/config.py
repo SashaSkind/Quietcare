@@ -72,13 +72,18 @@ class Settings(BaseSettings):
     browserbase_api_key: str = ""
     browserbase_project_id: str = ""
 
-    # Policy gate (ArmorIQ): sanctions high-stakes escalation actions (caretaker
-    # escalation, 911 dispatch). When unset, a mock allow-all gate is used.
-    # armoriq_fail_open: if ArmorIQ is unreachable, True lets actions proceed
-    # (a gate outage never blocks reaching help), False blocks (strict).
+    # ArmorIQ MCP security scanner: scans MCP server endpoints for vulnerabilities
+    # (SAFE-MCP techniques) and returns a vulnerability_score + severity_level via
+    # POST {base_url}/scan {"url": ...}. armoriq_scan_targets is a comma-separated
+    # list of MCP endpoint URLs to scan at startup (best-effort, logged).
     armoriq_api_key: str = ""
     armoriq_base_url: str = ""
-    armoriq_fail_open: bool = True
+    armoriq_scan_targets: str = ""
+
+    # Local policy gate: in-code chokepoint that can physically block high-stakes
+    # escalation actions ('escalation', 'emergency_dispatch'). Default allows;
+    # policy_block_actions is a comma-separated kill-switch (e.g. "emergency_dispatch").
+    policy_block_actions: str = ""
 
     # Sentry
     sentry_dsn: str = ""
@@ -142,6 +147,14 @@ class Settings(BaseSettings):
     @property
     def has_armoriq(self) -> bool:
         return bool(self.armoriq_api_key and self.armoriq_base_url)
+
+    @property
+    def scan_target_list(self) -> list[str]:
+        return [t.strip() for t in self.armoriq_scan_targets.split(",") if t.strip()]
+
+    @property
+    def blocked_action_set(self) -> set[str]:
+        return {a.strip() for a in self.policy_block_actions.split(",") if a.strip()}
 
     @property
     def has_sentry(self) -> bool:

@@ -19,7 +19,12 @@ from app.providers.bus import InProcessBus
 from app.providers.factory import Providers, _build_policy_gate
 from app.providers.llm import MockLLM
 from app.providers.memory import MockMemory
-from app.providers.policy_gate import GateDecision, MockPolicyGate, PolicyGate
+from app.providers.policy_gate import (
+    GateDecision,
+    LocalPolicyGate,
+    MockPolicyGate,
+    PolicyGate,
+)
 from app.providers.telephony import MockTelephony, TelephonyResult
 from app.providers.voice import MockVoice
 from app.session import SessionRegistry, confirm_911
@@ -47,15 +52,26 @@ class TestPolicyGateProvider(unittest.IsolatedAsyncioTestCase):
         d = await MockPolicyGate().sanction("escalation", {})
         self.assertTrue(d.allowed and d.mocked)
 
+    async def test_local_allows_by_default(self):
+        d = await LocalPolicyGate().sanction("escalation", {})
+        self.assertTrue(d.allowed)
+        self.assertEqual(d.source, "local")
+
+    async def test_local_kill_switch_blocks_named_action(self):
+        gate = LocalPolicyGate({"emergency_dispatch"})
+        self.assertFalse((await gate.sanction("emergency_dispatch", {})).allowed)
+        # Other actions still allowed.
+        self.assertTrue((await gate.sanction("escalation", {})).allowed)
+
 
 class TestFactorySelection(unittest.TestCase):
-    def test_mock_without_keys(self):
+    def test_local_gate_by_default(self):
         s = Settings(_env_file=None)
-        self.assertEqual(_build_policy_gate(s).name, "mock")
+        self.assertEqual(_build_policy_gate(s).name, "local")
 
-    def test_armoriq_with_keys(self):
-        s = Settings(_env_file=None, armoriq_api_key="k", armoriq_base_url="https://x")
-        self.assertEqual(_build_policy_gate(s).name, "armoriq")
+    def test_kill_switch_from_config(self):
+        s = Settings(_env_file=None, policy_block_actions="emergency_dispatch, escalation")
+        self.assertEqual(s.blocked_action_set, {"emergency_dispatch", "escalation"})
 
     def test_summary_includes_policy_gate(self):
         p = Providers(
@@ -63,25 +79,6 @@ class TestFactorySelection(unittest.TestCase):
             telephony=MockTelephony(), bus=InProcessBus(),
         )
         self.assertEqual(p.summary()["policy_gate"], "mock")
-
-
-class TestArmorIQFailModes(unittest.IsolatedAsyncioTestCase):
-    async def test_fail_open_allows_on_error(self):
-        from app.providers.policy_gate import ArmorIQPolicyGate
-
-        # Unreachable host -> error path.
-        gate = ArmorIQPolicyGate("k", "http://127.0.0.1:1", fail_open=True)
-        d = await gate.sanction("escalation", {})
-        self.assertTrue(d.allowed)
-        self.assertIn("fail-open", d.reason)
-
-    async def test_fail_closed_blocks_on_error(self):
-        from app.providers.policy_gate import ArmorIQPolicyGate
-
-        gate = ArmorIQPolicyGate("k", "http://127.0.0.1:1", fail_open=False)
-        d = await gate.sanction("escalation", {})
-        self.assertFalse(d.allowed)
-        self.assertIn("fail-closed", d.reason)
 
 
 class _AutoRespondWS:

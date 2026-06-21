@@ -15,9 +15,10 @@ from .audio_scene import (
 )
 from .browser import Browser, BrowserbaseBrowser, MockBrowser
 from .bus import BandBus, InProcessBus, MessageBus
-from .policy_gate import ArmorIQPolicyGate, MockPolicyGate, PolicyGate
 from .llm import LLM, AnthropicLLM, MockLLM
 from .memory import Memory, MockMemory, RedisMemory
+from .policy_gate import LocalPolicyGate, MockPolicyGate, PolicyGate
+from .security_scan import ArmorIQScanner, MockSecurityScanner, SecurityScanner
 from .telephony import MockTelephony, Telephony, TwilioTelephony
 from .voice import DeepgramVoice, MockVoice, Voice
 
@@ -36,6 +37,7 @@ class Providers:
     audio_scene: AudioScene = field(default_factory=MockAudioScene)
     browser: Browser = field(default_factory=MockBrowser)
     policy_gate: PolicyGate = field(default_factory=MockPolicyGate)
+    security_scan: SecurityScanner = field(default_factory=MockSecurityScanner)
 
     def summary(self) -> dict[str, str]:
         return {
@@ -47,6 +49,7 @@ class Providers:
             "audio_scene": self.audio_scene.name,
             "browser": self.browser.name,
             "policy_gate": self.policy_gate.name,
+            "security_scan": self.security_scan.name,
         }
 
 
@@ -175,15 +178,20 @@ def _build_browser(s: Settings) -> Browser:
 
 
 def _build_policy_gate(s: Settings) -> PolicyGate:
+    blocked = s.blocked_action_set
+    if blocked:
+        logger.info("policy_gate: local (kill-switch blocking %s)", sorted(blocked))
+    return LocalPolicyGate(blocked)
+
+
+def _build_security_scan(s: Settings) -> SecurityScanner:
     if s.has_armoriq:
         try:
-            logger.info("policy_gate: ArmorIQ enabled (fail_open=%s)", s.armoriq_fail_open)
-            return ArmorIQPolicyGate(
-                s.armoriq_api_key, s.armoriq_base_url, s.armoriq_fail_open
-            )
+            logger.info("security_scan: ArmorIQ enabled")
+            return ArmorIQScanner(s.armoriq_api_key, s.armoriq_base_url)
         except Exception as exc:
-            logger.warning("ArmorIQ init failed (%s); using mock policy gate", exc)
-    return MockPolicyGate()
+            logger.warning("ArmorIQ scanner init failed (%s); using mock", exc)
+    return MockSecurityScanner()
 
 
 def build_providers(s: Settings) -> Providers:
@@ -196,6 +204,7 @@ def build_providers(s: Settings) -> Providers:
         audio_scene=_build_audio_scene(s),
         browser=_build_browser(s),
         policy_gate=_build_policy_gate(s),
+        security_scan=_build_security_scan(s),
     )
     logger.info("providers: %s", providers.summary())
     return providers

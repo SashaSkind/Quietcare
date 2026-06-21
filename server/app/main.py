@@ -72,6 +72,18 @@ async def lifespan(app: FastAPI):
     app.state.caretaker = caretaker
     app.state.bg_tasks = set()
     logger.info("Quietcare backend up. providers=%s", providers.summary())
+
+    # Best-effort ArmorIQ posture scan of configured MCP endpoints at startup.
+    for target in settings.scan_target_list:
+        try:
+            res = await providers.security_scan.scan(target)
+            level = "warning" if res.severity_level not in ("safe", "unknown") else "info"
+            getattr(logger, level)(
+                "ArmorIQ scan %s: severity=%s score=%s mcp_endpoints=%s",
+                target, res.severity_level, res.vulnerability_score, res.mcp_endpoints,
+            )
+        except Exception as exc:  # pragma: no cover - external
+            logger.warning("startup security scan failed for %s (%s)", target, exc)
     yield
     logger.info("Quietcare backend shutting down.")
 
@@ -232,6 +244,21 @@ async def twilio_inbound_sms(
         capture(exc, where="twilio_inbound_sms", sender=From)
         logger.exception("inbound sms failed: %s", exc)
         return _twiml("Sorry, I couldn't pull an update right now. Please try again shortly.")
+
+
+class ScanRequest(BaseModel):
+    url: str
+
+
+@app.post("/admin/security-scan")
+async def security_scan(
+    body: ScanRequest, x_admin_token: Optional[str] = Header(default=None)
+) -> dict[str, object]:
+    """Run an ArmorIQ MCP vulnerability scan against an MCP endpoint URL and
+    return the vulnerability score + severity. Guarded by ADMIN_TOKEN."""
+    _check_admin(x_admin_token)
+    result = await app.state.providers.security_scan.scan(body.url)
+    return result.to_dict()
 
 
 class RefillRequest(BaseModel):

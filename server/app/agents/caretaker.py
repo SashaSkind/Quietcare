@@ -1,0 +1,124 @@
+"""Caretaker-agent: triages a bus escalation and alerts the human via Twilio."""
+
+from __future__ import annotations
+
+import json
+from typing import TYPE_CHECKING, Any
+
+from ..providers.llm import LLM
+from .base import run_agent
+
+if TYPE_CHECKING:
+    from ..session import ElderSession
+
+CARETAKER_SYSTEM = (
+    "You are Quietcare's caretaker-agent. You receive escalations from the "
+    "elder-agent over a message bus. Pull the elder's profile, triage the "
+    "severity, and on a real emergency notify the human caretaker via SMS "
+    "(send_caretaker_sms) and, for high severity, a voice call "
+    "(call_caretaker_voice). You may book a follow-up task. You must NEVER call "
+    "escalate_911 autonomously — it is gated and requires explicit human "
+    "confirmation."
+)
+
+CARETAKER_TOOLS: list[dict[str, Any]] = [
+    {
+        "name": "get_elder_profile",
+        "description": "Fetch the elder's stored profile.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "send_caretaker_sms",
+        "description": "Send an SMS to the human caretaker (Twilio).",
+        "input_schema": {
+            "type": "object",
+            "properties": {"text": {"type": "string"}},
+            "required": ["text"],
+        },
+    },
+    {
+        "name": "call_caretaker_voice",
+        "description": "Place a voice call to the human caretaker (Twilio).",
+        "input_schema": {
+            "type": "object",
+            "properties": {"summary": {"type": "string"}},
+            "required": ["summary"],
+        },
+    },
+    {
+        "name": "book_task",
+        "description": "Book a follow-up task for the caretaker (stub).",
+        "input_schema": {
+            "type": "object",
+            "properties": {"task": {"type": "object"}},
+            "required": ["task"],
+        },
+    },
+    {
+        "name": "escalate_911",
+        "description": (
+            "GATED. Initiate a 911 escalation. Requires human_confirmed=true; "
+            "never call this autonomously."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "reason": {"type": "string"},
+                "human_confirmed": {"type": "boolean"},
+            },
+            "required": ["reason"],
+        },
+    },
+]
+
+
+async def run_caretaker_agent(
+    session: "ElderSession", llm: LLM, msg: dict[str, Any]
+) -> str:
+    p = session.providers
+    elder_id = session.elder_id
+
+    async def dispatch(name: str, args: dict[str, Any]) -> str:
+        if name == "get_elder_profile":
+            profile = await p.memory.get_profile(elder_id)
+            return json.dumps(profile or {"elder_id": elder_id})
+
+        if name == "send_caretaker_sms":
+            session.caretaker_notified_once()
+            res = await p.telephony.send_sms(args["text"])
+            return f"sms: ok={res.ok} mocked={res.mocked} ({res.detail})"
+
+        if name == "call_caretaker_voice":
+            session.caretaker_notified_once()
+            res = await p.telephony.call_voice(args["summary"])
+            return f"call: ok={res.ok} mocked={res.mocked} ({res.detail})"
+
+        if name == "book_task":
+            return f"task booked (stub): {json.dumps(args.get('task', {}))}"
+
+        if name == "escalate_911":
+            # Hard gate enforced in the state machine.
+            human_confirmed = bool(args.get("human_confirmed", False))
+            try:
+                session.fsm.gate_911(human_confirmed=human_confirmed)
+            except Exception as exc:
+                return f"BLOCKED: {exc}"
+            return "911 path entered (human confirmed)"
+
+        return f"unknown tool: {name}"
+
+    user_prompt = (
+        "Escalation received over the bus:\n"
+        f"severity={msg.get('severity')}\n"
+        f"summary={msg.get('summary')}\n"
+        f"evidence={json.dumps(msg.get('evidence', {}))}\n"
+        "Triage and notify the human caretaker appropriately."
+    )
+    return await run_agent(
+        llm=llm,
+        system=CARETAKER_SYSTEM,
+        user_prompt=user_prompt,
+        tools=CARETAKER_TOOLS,
+        dispatch=dispatch,
+        label="caretaker-agent",
+    )

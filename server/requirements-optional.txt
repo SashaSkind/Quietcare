@@ -1,0 +1,8 @@
+# Optional real-provider SDKs. The backend runs fully without these (it falls
+# back to mocks); install to enable real integrations. Versions are loose so pip
+# can resolve a consistent set alongside the core runtime.
+anthropic>=0.40
+redis>=5.0
+twilio>=9.0
+deepgram-sdk>=3.7
+sentry-sdk[fastapi]>=2.0

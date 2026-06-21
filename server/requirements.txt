@@ -1,0 +1,9 @@
+# Core runtime — required to run the backend with all-mock providers (no keys).
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30,<1.0
+pydantic>=2.8,<3.0
+pydantic-settings>=2.4,<3.0
+python-dotenv>=1.0,<2.0
+
+# Real providers are OPTIONAL and lazy-imported; install them only to enable
+# real integrations:  pip install -r requirements-optional.txt

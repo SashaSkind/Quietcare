@@ -1,6 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import * as Speech from 'expo-speech';
 import type { DemoState } from './types';
 import { COUNTDOWN_SECONDS } from './theme';
+
+// Speak a line with a calm, slightly slow voice. Stops any in-progress speech
+// first so prompts never overlap. Fails soft where TTS is unavailable.
+function say(text: string): void {
+  try {
+    Speech.stop();
+    Speech.speak(text, { rate: 0.95, pitch: 1.0 });
+  } catch {
+    // no-op: TTS not available on this platform
+  }
+}
 
 export interface DemoMachine {
   state: DemoState;
@@ -39,6 +51,7 @@ export function useDemoMachine(): DemoMachine {
     clearAll();
     setState('escalating');
     setTranscript('No clear response — reaching your caretaker.');
+    say('I didn’t hear a response. I’m reaching your caretaker now. Help is on the way.');
     later(() => {
       setState('escalated');
       setTranscript('Caretaker notified. Help is on the way.');
@@ -55,6 +68,7 @@ export function useDemoMachine(): DemoMachine {
     setState('checking_in');
     setTranscript('Margaret, are you okay?');
     setCountdown(COUNTDOWN_SECONDS);
+    say('Margaret, are you okay? Tap I’m okay, or I need help. I’ll wait ten seconds.');
     tick.current = setInterval(() => {
       setCountdown((c) => {
         if (c <= 1) {
@@ -70,6 +84,7 @@ export function useDemoMachine(): DemoMachine {
     clearAll();
     setState('resolved');
     setTranscript('“I’m fine, just dropped a cup.”');
+    say('Glad you’re okay. I’ve logged it, and I didn’t bother anyone.');
     later(() => {
       setState('idle');
       setTranscript('');
@@ -79,17 +94,33 @@ export function useDemoMachine(): DemoMachine {
 
   const callForHelp = useCallback(() => {
     setTranscript('“I can’t get up.”');
+    say('Okay. I’m calling for help right now.');
     escalate();
   }, [escalate]);
 
   const reset = useCallback(() => {
     clearAll();
+    try {
+      Speech.stop();
+    } catch {
+      // no-op
+    }
     setState('idle');
     setTranscript('');
     setCountdown(COUNTDOWN_SECONDS);
   }, [clearAll]);
 
-  useEffect(() => clearAll, [clearAll]);
+  // Stop any in-progress speech on unmount.
+  useEffect(() => {
+    return () => {
+      clearAll();
+      try {
+        Speech.stop();
+      } catch {
+        // no-op
+      }
+    };
+  }, [clearAll]);
 
   return { state, countdown, transcript, trigger, confirmOk, callForHelp, reset };
 }

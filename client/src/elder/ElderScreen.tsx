@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Audio } from 'expo-av';
 import { DemoScreen } from '../design/DemoScreen';
 import { useDemoMachine } from '../design/useDemoMachine';
 import { theme } from '../design/theme';
@@ -16,6 +17,11 @@ export function ElderScreen({ user, onLogout }: { user: DemoUser; onLogout: () =
   const [mag, setMag] = useState(1);
   const [lastFall, setLastFall] = useState<number | null>(null);
   const reportedFor = useRef<string>('');
+
+  // Allow the spoken check-in to be heard even with the iOS mute switch on.
+  useEffect(() => {
+    Audio.setAudioModeAsync({ playsInSilentModeIOS: true }).catch(() => {});
+  }, []);
 
   // Real fall detection: only armed while idle so a check-in isn't re-triggered.
   useFallSensor({

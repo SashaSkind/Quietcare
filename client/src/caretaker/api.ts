@@ -2,7 +2,7 @@
 // FastAPI backend (config.API_URL). React Native fetch has no CORS, so this
 // works directly against the LAN backend on a physical device.
 
-import { API_URL, ELDER_ID } from '../config';
+import { ADMIN_TOKEN, API_URL, ELDER_ID } from '../config';
 
 export interface ElderProfile {
   name?: string;
@@ -10,6 +10,11 @@ export interface ElderProfile {
   conditions?: string[];
   medications?: string[];
   caretaker?: { name?: string; phone?: string };
+}
+
+export interface ElderSummaryItem {
+  elder_id: string;
+  profile: ElderProfile;
 }
 
 export interface IncidentEvent {
@@ -63,10 +68,32 @@ async function getJson<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
+function adminHeaders(): Record<string, string> {
+  return ADMIN_TOKEN ? { 'X-Admin-Token': ADMIN_TOKEN } : {};
+}
+
 async function postJson<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      ...adminHeaders(),
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return (await res.json()) as T;
+}
+
+async function putJson<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${API_URL}${path}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+      ...adminHeaders(),
+    },
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
@@ -74,6 +101,20 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
 }
 
 export const careApi = {
+  // List every provisioned elder with their profile, so a caretaker can pick
+  // which resident to view (people often care for more than one).
+  listElders: async (): Promise<ElderSummaryItem[]> => {
+    const { elders } = await getJson<{ elders: string[] }>('/elders');
+    const profiles = await Promise.all(
+      elders.map((id) =>
+        getJson<{ elder_id: string; profile: ElderProfile }>(`/elders/${id}`).catch(
+          () => ({ elder_id: id, profile: {} as ElderProfile }),
+        ),
+      ),
+    );
+    return profiles;
+  },
+
   elder: (id = ELDER_ID) =>
     getJson<{ elder_id: string; profile: ElderProfile }>(`/elders/${id}`),
 
@@ -101,6 +142,18 @@ export const careApi = {
 
   callBridge: (id = ELDER_ID) =>
     postJson<{ prompted: boolean }>(`/elders/${id}/call-bridge`, {}),
+
+  // Replace the elder's recurring medication schedule. The backend scheduler
+  // (MedicationService) speaks each due med to the elder as a voice reminder.
+  setMedications: (meds: MedicationItem[], id = ELDER_ID) =>
+    putJson<{ elder_id: string; medications: MedicationItem[] }>(
+      `/elders/${id}/medications`,
+      { medications: meds },
+    ),
+
+  // Fire a medication voice reminder immediately (requires connected device).
+  remindNow: (med: MedicationItem, id = ELDER_ID) =>
+    postJson<{ event: MedicationEvent }>(`/elders/${id}/medications/remind`, med),
 
   // Elder-side: report an on-device fall so it surfaces on the dashboard.
   reportIncident: (

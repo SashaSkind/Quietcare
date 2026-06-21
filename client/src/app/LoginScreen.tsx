@@ -53,12 +53,6 @@ export function LoginScreen({ onLogin }: { onLogin: (user: DemoUser) => void }) 
           <Text style={styles.signInText}>Sign in</Text>
         </Pressable>
 
-        <View style={styles.divider}>
-          <View style={styles.line} />
-          <Text style={styles.dividerText}>demo accounts</Text>
-          <View style={styles.line} />
-        </View>
-
         <Pressable
           style={({ pressed }) => [styles.demoBtn, styles.caretakerBtn, pressed && styles.pressed]}
           onPress={loginAs('caretaker')}
@@ -81,8 +75,6 @@ export function LoginScreen({ onLogin }: { onLogin: (user: DemoUser) => void }) 
           </View>
         </Pressable>
       </View>
-
-      <Text style={styles.footer}>No password needed — these are demo logins.</Text>
     </View>
   );
 }
@@ -131,9 +123,6 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   signInText: { color: theme.textPrimary, fontSize: 16, fontWeight: '700' },
-  divider: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 14 },
-  line: { flex: 1, height: 1, backgroundColor: 'rgba(255,255,255,0.10)' },
-  dividerText: { color: theme.textSecondary, fontSize: 12, textTransform: 'uppercase', letterSpacing: 1 },
   demoBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -149,5 +138,4 @@ const styles = StyleSheet.create({
   demoTitle: { color: theme.textPrimary, fontSize: 17, fontWeight: '800' },
   demoSub: { color: theme.textSecondary, fontSize: 13, marginTop: 1 },
   pressed: { opacity: 0.75 },
-  footer: { color: theme.textSecondary, fontSize: 12, textAlign: 'center', marginTop: 22 },
 });

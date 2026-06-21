@@ -47,7 +47,6 @@ export function DemoScreen({ machine }: { machine?: DemoMachine } = {}) {
       {/* Brand */}
       <View style={styles.brand}>
         <Text style={styles.brandName}>Quietcare</Text>
-        <Text style={styles.brandTag}>{theme.name} · {theme.tagline}</Text>
       </View>
 
       {/* Orb + status */}
@@ -74,7 +73,6 @@ export function DemoScreen({ machine }: { machine?: DemoMachine } = {}) {
             <Text style={styles.simulateLabel}>Simulate Fall</Text>
           </Pressable>
         )}
-        <Text style={styles.demoNote}>demo preview · {theme.name}</Text>
       </View>
 
       {/* Fall check-in overlay */}
@@ -100,7 +98,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     fontFamily: theme.fontFamily,
   },
-  brandTag: { color: theme.textSecondary, fontSize: 13, fontWeight: '600', fontFamily: theme.fontFamily },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8 },
   status: { alignItems: 'center', gap: 6, marginTop: 8 },
   check: { color: theme.ok, fontSize: 44, fontWeight: '900', marginBottom: -4 },
@@ -136,10 +133,4 @@ const styles = StyleSheet.create({
     fontFamily: theme.fontFamily,
   },
   pressed: { opacity: 0.7 },
-  demoNote: {
-    color: theme.textSecondary,
-    fontSize: 12,
-    opacity: 0.6,
-    fontFamily: theme.fontFamily,
-  },
 });

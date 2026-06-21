@@ -15,6 +15,11 @@ export const SENTRY_DSN: string = process.env.EXPO_PUBLIC_SENTRY_DSN ?? '';
 export const ELDER_ID: string =
   process.env.EXPO_PUBLIC_ELDER_ID ?? 'margaret-01';
 
+// Optional shared admin token. The backend guards provisioning + medication
+// schedule writes with X-Admin-Token only when ADMIN_TOKEN is configured;
+// leave unset for the open local/demo backend.
+export const ADMIN_TOKEN: string = process.env.EXPO_PUBLIC_ADMIN_TOKEN ?? '';
+
 // Tunables.
 export const HEARTBEAT_INTERVAL_MS = 30_000;
 export const RECONNECT_BASE_DELAY_MS = 1_000;

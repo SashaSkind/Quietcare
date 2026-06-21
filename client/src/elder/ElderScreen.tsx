@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { Audio } from 'expo-av';
+import { Audio, InterruptionModeIOS } from 'expo-av';
+import * as Speech from 'expo-speech';
 import { DemoScreen } from '../design/DemoScreen';
 import { useDemoMachine } from '../design/useDemoMachine';
 import { theme } from '../design/theme';
@@ -16,12 +17,32 @@ export function ElderScreen({ user, onLogout }: { user: DemoUser; onLogout: () =
   const machine = useDemoMachine();
   const [mag, setMag] = useState(1);
   const [lastFall, setLastFall] = useState<number | null>(null);
+  const [voice, setVoice] = useState('');
   const reportedFor = useRef<string>('');
 
   // Allow the spoken check-in to be heard even with the iOS mute switch on.
+  // Set a full playback session so AVSpeechSynthesizer routes to the speaker.
   useEffect(() => {
-    Audio.setAudioModeAsync({ playsInSilentModeIOS: true }).catch(() => {});
+    Audio.setAudioModeAsync({
+      playsInSilentModeIOS: true,
+      allowsRecordingIOS: false,
+      interruptionModeIOS: InterruptionModeIOS.DuckOthers,
+      shouldDuckAndroid: true,
+      playThroughEarpieceAndroid: false,
+    }).catch((e) => setVoice(`audio mode err: ${String(e)}`));
   }, []);
+
+  // Direct TTS test so audio can be verified independent of the fall flow.
+  const testVoice = () => {
+    setVoice('speaking…');
+    Speech.stop();
+    Speech.speak('Margaret, can you hear me? This is a voice test.', {
+      rate: 0.95,
+      onDone: () => setVoice('voice ok ✓'),
+      onStopped: () => setVoice('stopped'),
+      onError: (e) => setVoice(`voice error: ${String(e)}`),
+    });
+  };
 
   // Real fall detection: only armed while idle so a check-in isn't re-triggered.
   useFallSensor({
@@ -75,10 +96,21 @@ export function ElderScreen({ user, onLogout }: { user: DemoUser; onLogout: () =
             {armed ? 'Fall detection on' : 'Checking in'} · |a| {mag.toFixed(2)}g
           </Text>
         </View>
-        <Pressable style={styles.logout} onPress={onLogout}>
-          <Text style={styles.logoutText}>Log out</Text>
-        </Pressable>
+        <View style={styles.rightBtns}>
+          <Pressable style={styles.logout} onPress={testVoice}>
+            <Text style={styles.logoutText}>🔊 Test</Text>
+          </Pressable>
+          <Pressable style={styles.logout} onPress={onLogout}>
+            <Text style={styles.logoutText}>Log out</Text>
+          </Pressable>
+        </View>
       </View>
+
+      {!!voice && (
+        <View style={styles.voiceStatus} pointerEvents="none">
+          <Text style={styles.voiceStatusText}>{voice}</Text>
+        </View>
+      )}
 
       {/* Hint so a demo viewer knows how to trigger a real fall */}
       {armed && (
@@ -129,6 +161,9 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   logoutText: { color: theme.textPrimary, fontSize: 12, fontWeight: '700' },
+  rightBtns: { flexDirection: 'row', gap: 8 },
+  voiceStatus: { position: 'absolute', top: 48, right: 16 },
+  voiceStatusText: { color: theme.textSecondary, fontSize: 11 },
   hint: {
     position: 'absolute',
     bottom: 168,

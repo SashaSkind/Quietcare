@@ -1,11 +1,16 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { theme } from '../design/theme';
@@ -61,23 +66,34 @@ const STATUS_META: Record<CareStatus, { label: string; color: string; bg: string
   alerting: { label: 'Needs attention', color: '#fb7185', bg: 'rgba(251,113,133,0.18)' },
 };
 
-export function CaretakerDashboard({ user, onLogout }: { user: DemoUser; onLogout: () => void }) {
+export function CaretakerDashboard({
+  user,
+  elderId,
+  onBack,
+  onLogout,
+}: {
+  user: DemoUser;
+  elderId: string;
+  onBack: () => void;
+  onLogout: () => void;
+}) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [addMedOpen, setAddMedOpen] = useState(false);
   const mounted = useRef(true);
 
   const load = useCallback(async () => {
     try {
       const [elder, summary, wellness, adherence, meds, events, confirmation] =
         await Promise.all([
-          careApi.elder(user.elderId),
-          careApi.summary(user.elderId),
-          careApi.wellness(user.elderId),
-          careApi.adherence(user.elderId),
-          careApi.medications(user.elderId),
-          careApi.events(user.elderId),
-          careApi.confirmation(user.elderId),
+          careApi.elder(elderId),
+          careApi.summary(elderId),
+          careApi.wellness(elderId),
+          careApi.adherence(elderId),
+          careApi.medications(elderId),
+          careApi.events(elderId),
+          careApi.confirmation(elderId),
         ]);
       if (!mounted.current) return;
       setData({
@@ -93,7 +109,16 @@ export function CaretakerDashboard({ user, onLogout }: { user: DemoUser; onLogou
     } catch (e) {
       if (mounted.current) setError(String((e as Error).message || e));
     }
-  }, [user.elderId]);
+  }, [elderId]);
+
+  const saveMedication = useCallback(
+    async (med: MedicationItem) => {
+      const existing = data?.medications ?? [];
+      await careApi.setMedications([...existing, med], elderId);
+      await load();
+    },
+    [data?.medications, elderId, load],
+  );
 
   useEffect(() => {
     mounted.current = true;
@@ -124,9 +149,14 @@ export function CaretakerDashboard({ user, onLogout }: { user: DemoUser; onLogou
     <View style={styles.root}>
       {/* Header */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.brand}>Quietcare</Text>
-          <Text style={styles.role}>Caretaker · {user.name}</Text>
+        <View style={styles.headerLeft}>
+          <Pressable style={styles.backBtn} onPress={onBack}>
+            <Text style={styles.backText}>‹</Text>
+          </Pressable>
+          <View>
+            <Text style={styles.brand}>Quietcare</Text>
+            <Text style={styles.role}>Caretaker · {user.name}</Text>
+          </View>
         </View>
         <Pressable style={styles.logout} onPress={onLogout}>
           <Text style={styles.logoutText}>Log out</Text>
@@ -208,7 +238,18 @@ export function CaretakerDashboard({ user, onLogout }: { user: DemoUser; onLogou
 
           {/* Medications */}
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Medications</Text>
+            <View style={styles.cardTitleRow}>
+              <Text style={styles.cardTitle}>Medications</Text>
+              <Pressable
+                style={({ pressed }) => [styles.addBtn, pressed && styles.pressed]}
+                onPress={() => setAddMedOpen(true)}
+              >
+                <Text style={styles.addBtnText}>+</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.medHint}>
+              Scheduled meds are spoken to {name.split(' ')[0]} as a voice reminder.
+            </Text>
             {data.medications.length === 0 ? (
               <Text style={styles.muted}>No medications scheduled.</Text>
             ) : (
@@ -237,7 +278,136 @@ export function CaretakerDashboard({ user, onLogout }: { user: DemoUser; onLogou
           <Text style={styles.footer}>Live · refreshes every {POLL_MS / 1000}s · pull to refresh</Text>
         </ScrollView>
       )}
+
+      <AddMedicationModal
+        visible={addMedOpen}
+        elderName={name.split(' ')[0]}
+        onClose={() => setAddMedOpen(false)}
+        onSave={saveMedication}
+      />
     </View>
+  );
+}
+
+function AddMedicationModal({
+  visible,
+  elderName,
+  onClose,
+  onSave,
+}: {
+  visible: boolean;
+  elderName: string;
+  onClose: () => void;
+  onSave: (med: MedicationItem) => Promise<void>;
+}) {
+  const [name, setName] = useState('');
+  const [time, setTime] = useState('');
+  const [dose, setDose] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const reset = () => {
+    setName('');
+    setTime('');
+    setDose('');
+    setSaving(false);
+  };
+
+  const close = () => {
+    reset();
+    onClose();
+  };
+
+  const submit = async () => {
+    const cleanName = name.trim();
+    const cleanTime = time.trim();
+    if (!cleanName) {
+      Alert.alert('Add a name', 'Enter the medication name.');
+      return;
+    }
+    if (!/^([01]?\d|2[0-3]):[0-5]\d$/.test(cleanTime)) {
+      Alert.alert('Check the time', 'Use 24-hour HH:MM format, e.g. 08:00 or 14:30.');
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave({
+        name: cleanName,
+        time: cleanTime,
+        dose: dose.trim() || null,
+      });
+      close();
+    } catch (e) {
+      setSaving(false);
+      Alert.alert("Couldn't save", String((e as Error).message || e));
+    }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={close}>
+      <KeyboardAvoidingView
+        style={styles.modalRoot}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <Pressable style={styles.modalBackdrop} onPress={close} />
+        <View style={styles.modalSheet}>
+          <Text style={styles.modalTitle}>Add a recurring medication</Text>
+          <Text style={styles.modalSub}>
+            {elderName} will get a daily voice reminder at this time to take it.
+          </Text>
+
+          <Text style={styles.fieldLabel}>Medication</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="e.g. Blood pressure pill"
+            placeholderTextColor={theme.textSecondary}
+            value={name}
+            onChangeText={setName}
+            autoFocus
+          />
+
+          <Text style={styles.fieldLabel}>Time (24h, HH:MM)</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="e.g. 08:00"
+            placeholderTextColor={theme.textSecondary}
+            value={time}
+            onChangeText={setTime}
+            keyboardType="numbers-and-punctuation"
+            maxLength={5}
+          />
+
+          <Text style={styles.fieldLabel}>Dose (optional)</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="e.g. 1 tablet"
+            placeholderTextColor={theme.textSecondary}
+            value={dose}
+            onChangeText={setDose}
+          />
+
+          <View style={styles.modalActions}>
+            <Pressable
+              style={({ pressed }) => [styles.modalBtn, styles.cancelBtn, pressed && styles.pressed]}
+              onPress={close}
+              disabled={saving}
+            >
+              <Text style={styles.cancelText}>Cancel</Text>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [styles.modalBtn, styles.saveBtn, pressed && styles.pressed]}
+              onPress={submit}
+              disabled={saving}
+            >
+              {saving ? (
+                <ActivityIndicator color="#1a0a24" />
+              ) : (
+                <Text style={styles.saveText}>Add reminder</Text>
+              )}
+            </Pressable>
+          </View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
   );
 }
 
@@ -298,6 +468,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 12,
   },
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  backBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  backText: { color: theme.textPrimary, fontSize: 24, fontWeight: '700', marginTop: -3 },
   brand: { color: theme.textPrimary, fontSize: 22, fontWeight: '900' },
   role: { color: theme.textSecondary, fontSize: 13, marginTop: 1 },
   logout: {
@@ -345,6 +526,49 @@ const styles = StyleSheet.create({
   dot: { width: 9, height: 9, borderRadius: 5 },
   pillText: { fontSize: 14, fontWeight: '700' },
   cardTitle: { color: theme.textPrimary, fontSize: 16, fontWeight: '800' },
+  cardTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  addBtn: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: theme.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addBtnText: { color: '#1a0a24', fontSize: 22, fontWeight: '900', marginTop: -2 },
+  medHint: { color: theme.textSecondary, fontSize: 12, marginTop: -2 },
+  pressed: { opacity: 0.7 },
+  modalRoot: { flex: 1, justifyContent: 'flex-end' },
+  modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.55)' },
+  modalSheet: {
+    backgroundColor: '#171232',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    padding: 22,
+    paddingBottom: 34,
+    gap: 8,
+  },
+  modalTitle: { color: theme.textPrimary, fontSize: 20, fontWeight: '900' },
+  modalSub: { color: theme.textSecondary, fontSize: 14, marginBottom: 6 },
+  fieldLabel: { color: theme.textSecondary, fontSize: 13, fontWeight: '600', marginTop: 6 },
+  input: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: theme.textPrimary,
+    fontSize: 16,
+  },
+  modalActions: { flexDirection: 'row', gap: 12, marginTop: 18 },
+  modalBtn: { flex: 1, borderRadius: 12, paddingVertical: 14, alignItems: 'center', justifyContent: 'center' },
+  cancelBtn: { backgroundColor: 'rgba(255,255,255,0.08)' },
+  cancelText: { color: theme.textPrimary, fontSize: 15, fontWeight: '700' },
+  saveBtn: { backgroundColor: theme.accent },
+  saveText: { color: '#1a0a24', fontSize: 15, fontWeight: '800' },
   recap: { color: theme.textPrimary, fontSize: 16, lineHeight: 23, opacity: 0.92 },
   tiles: { flexDirection: 'row', gap: 10 },
   tile: {

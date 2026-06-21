@@ -4,10 +4,10 @@ import type { OrbMode } from './types';
 import { theme } from './theme';
 
 // ============================================================================
-// DESIGN B — "Pulse" orb
-// A crisp, high-contrast core that breathes, surrounded by clean concentric
-// rings and outward-rippling pulse rings (staggered). No soft blur — bold,
-// legible structure. Pure RN primitives, adoptable into the native app.
+// DESIGN C — "Halo" orb
+// A circular, audio-reactive waveform: a ring of bars whose lengths breathe in
+// and out organically, around a soft glowing core. Calm + premium when idle,
+// livelier while listening, rose-toned when urgent. Pure RN primitives.
 // ============================================================================
 
 interface OrbProps {
@@ -21,89 +21,108 @@ function accentFor(mode: OrbMode): string {
   return theme.orbIdle[3];
 }
 
-const RIPPLES = [0, 1, 2];
+const BAR_COUNT = 36;
+
+interface BarCfg {
+  value: Animated.Value;
+  dur: number;
+  peak: number;
+}
 
 export function Orb({ mode, size = 260 }: OrbProps) {
-  const breathe = useRef(new Animated.Value(0)).current;
-  const ripples = useRef(RIPPLES.map(() => new Animated.Value(0))).current;
   const accent = accentFor(mode);
   const active = mode === 'listening' || mode === 'urgent';
-  const core = size * 0.42;
+  const glow = useRef(new Animated.Value(0)).current;
+  // Stable per-bar config (random phase/speed/peak) for an organic waveform.
+  const bars = useRef<BarCfg[]>(
+    Array.from({ length: BAR_COUNT }, () => ({
+      value: new Animated.Value(Math.random()),
+      dur: 700 + Math.random() * 900,
+      peak: 0.55 + Math.random() * 0.6,
+    })),
+  ).current;
+
+  const radius = size * 0.34;
+  const barLen = size * 0.22;
+  const amp = active ? 1 : 0.45;
+  const speed = active ? 0.6 : 1.1;
 
   useEffect(() => {
-    const speed = active ? 1100 : 3600;
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(breathe, { toValue: 1, duration: speed, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-        Animated.timing(breathe, { toValue: 0, duration: speed, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
-      ]),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [active, breathe]);
-
-  useEffect(() => {
-    const period = mode === 'urgent' ? 1400 : 2200;
-    const loops = ripples.map((v, i) =>
+    const loops = bars.map(({ value, dur }) =>
       Animated.loop(
         Animated.sequence([
-          Animated.delay((period / RIPPLES.length) * i),
-          Animated.timing(v, { toValue: 1, duration: period, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+          Animated.timing(value, { toValue: 1, duration: dur * speed, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+          Animated.timing(value, { toValue: 0, duration: dur * speed, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
         ]),
       ),
     );
     loops.forEach((l) => l.start());
-    return () => loops.forEach((l) => l.stop());
-  }, [mode, ripples]);
+    const g = Animated.loop(
+      Animated.sequence([
+        Animated.timing(glow, { toValue: 1, duration: active ? 1400 : 3800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        Animated.timing(glow, { toValue: 0, duration: active ? 1400 : 3800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      ]),
+    );
+    g.start();
+    return () => {
+      loops.forEach((l) => l.stop());
+      g.stop();
+    };
+  }, [bars, glow, active, speed]);
 
-  const coreScale = breathe.interpolate({ inputRange: [0, 1], outputRange: active ? [0.9, 1.08] : [0.96, 1.04] });
+  const glowScale = glow.interpolate({ inputRange: [0, 1], outputRange: active ? [0.92, 1.1] : [0.97, 1.05] });
+  const coreSize = size * 0.34;
 
   return (
     <View style={[styles.wrap, { width: size * 1.7, height: size * 1.7 }]}>
-      {/* Static structural rings */}
-      {[1, 0.72].map((f, i) => (
-        <View
-          key={`s${i}`}
-          style={[styles.ringBase, { width: size * f, height: size * f, borderRadius: (size * f) / 2, borderColor: accent, opacity: 0.18 }]}
-        />
-      ))}
-      {/* Outward ripple rings */}
-      {ripples.map((v, i) => (
-        <Animated.View
-          key={`r${i}`}
-          style={[
-            styles.ringBase,
-            {
-              width: size * 0.6,
-              height: size * 0.6,
-              borderRadius: size * 0.3,
-              borderColor: accent,
-              transform: [{ scale: v.interpolate({ inputRange: [0, 1], outputRange: [1, 2.4] }) }],
-              opacity: v.interpolate({ inputRange: [0, 1], outputRange: [0.6, 0] }),
-            },
-          ]}
-        />
-      ))}
-      {/* Bold solid core */}
+      {/* Soft glowing core */}
       <Animated.View
         style={[
           styles.core,
           {
-            width: core,
-            height: core,
-            borderRadius: core / 2,
+            width: coreSize,
+            height: coreSize,
+            borderRadius: coreSize / 2,
             backgroundColor: accent,
-            transform: [{ scale: coreScale }],
-            ...({ boxShadow: `0 0 ${size / 3}px ${accent}` } as object),
+            opacity: 0.9,
+            transform: [{ scale: glowScale }],
+            ...({ filter: 'blur(6px)', boxShadow: `0 0 ${size / 2.4}px ${accent}` } as object),
           },
         ]}
       />
+      {/* Circular waveform of bars */}
+      {bars.map(({ value, peak }, i) => {
+        const rot = (360 / BAR_COUNT) * i;
+        const scaleY = value.interpolate({
+          inputRange: [0, 1],
+          outputRange: [0.3, 0.3 + peak * amp],
+        });
+        return (
+          <Animated.View
+            key={i}
+            style={[
+              styles.bar,
+              {
+                width: 4,
+                height: barLen,
+                borderRadius: 2,
+                backgroundColor: accent,
+                transform: [
+                  { rotate: `${rot}deg` },
+                  { translateY: -radius },
+                  { scaleY },
+                ],
+              },
+            ]}
+          />
+        );
+      })}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   wrap: { alignItems: 'center', justifyContent: 'center' },
-  ringBase: { position: 'absolute', borderWidth: 3 },
   core: { position: 'absolute' },
+  bar: { position: 'absolute' },
 });

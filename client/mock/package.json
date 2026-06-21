@@ -1,0 +1,13 @@
+{
+  "name": "quietcare-mock-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Throwaway WebSocket test harness for the Quietcare client (client-only, not the real backend).",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

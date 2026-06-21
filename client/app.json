@@ -57,7 +57,8 @@
           "project": "quitecareclient"
         }
       ],
-      "expo-asset"
+      "expo-asset",
+      "react-native-fast-tflite"
     ],
     "extra": {
       "eas": {

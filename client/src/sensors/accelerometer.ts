@@ -1,7 +1,8 @@
 import { Accelerometer } from 'expo-sensors';
-import { ACCELEROMETER_HZ, FALL_DETECTION } from '../config';
+import { ACCELEROMETER_HZ, FALL_DETECTION, FALL_MODEL } from '../config';
 import type { AccelSample } from './detectFall';
 import { detectFall } from './detectFall';
+import { predictFall } from './fallModel';
 
 const UPDATE_INTERVAL_MS = Math.round(1000 / ACCELEROMETER_HZ);
 // Sliding window sized to the configured analysis window (~2.5s @ 50Hz).
@@ -19,6 +20,9 @@ export class AccelerometerMonitor {
   // Refractory period: ignore detections for cooldownMs after one fires so a
   // single fall doesn't spam multiple triggers.
   private cooldownUntil = 0;
+  // Separate refractory + in-flight guard for the (async) ML confirmer.
+  private modelCooldownUntil = 0;
+  private modelInFlight = false;
 
   constructor(handlers: AccelerometerHandlers) {
     this.handlers = handlers;
@@ -44,8 +48,40 @@ export class AccelerometerMonitor {
         // Clear the buffer so the same impact samples can't re-trigger.
         this.windowBuffer = [];
         this.handlers.onFallDetected();
+        return;
+      }
+
+      // ML confirmer: only when enabled, past cooldowns, not already running,
+      // and a sample exceeds the cheap pre-gate (keeps inference off when idle).
+      if (
+        FALL_MODEL.enabled &&
+        !this.modelInFlight &&
+        sample.ts >= this.modelCooldownUntil &&
+        sample.magnitude >= FALL_MODEL.gateG
+      ) {
+        this.runModel([...this.windowBuffer]);
       }
     });
+  }
+
+  /** Fire-and-forget ML inference; triggers on a high fall probability. The
+   * threshold detector is unaffected if the model is absent (predictFall -> null). */
+  private runModel(window: AccelSample[]): void {
+    this.modelInFlight = true;
+    predictFall(window)
+      .then((prob) => {
+        this.modelInFlight = false;
+        if (prob !== null && prob >= FALL_MODEL.threshold) {
+          const now = Date.now();
+          this.modelCooldownUntil = now + FALL_MODEL.cooldownMs;
+          this.cooldownUntil = now + FALL_DETECTION.cooldownMs;
+          this.windowBuffer = [];
+          this.handlers.onFallDetected();
+        }
+      })
+      .catch(() => {
+        this.modelInFlight = false;
+      });
   }
 
   stop(): void {
@@ -53,5 +89,7 @@ export class AccelerometerMonitor {
     this.subscription = null;
     this.windowBuffer = [];
     this.cooldownUntil = 0;
+    this.modelCooldownUntil = 0;
+    this.modelInFlight = false;
   }
 }

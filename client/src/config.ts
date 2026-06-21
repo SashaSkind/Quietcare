@@ -34,6 +34,31 @@ export const FALL_DETECTION = {
 } as const;
 
 /**
+ * On-device ML fall model (SisFall-style CNN-LSTM via TFLite). This runs
+ * ALONGSIDE the threshold detector above as a more-robust confirmer — the
+ * threshold path keeps working even if the model/native module is absent. The
+ * model only runs when a sample exceeds `gateG` (a cheap pre-gate), so
+ * inference stays off during quiet periods (battery + cost).
+ *
+ * It is a graceful no-op until a `.tflite` model asset is provided and injected
+ * via `setFallModelSource(...)` (see client README / sensors/fallModel.ts).
+ */
+export const FALL_MODEL = {
+  /** Master switch for the ML path. */
+  enabled: true,
+  /** Model input sampling rate; the 50Hz stream is resampled to this. */
+  modelHz: 20,
+  /** Timesteps fed to the model (~2.56s @ 20Hz, a common SisFall window). */
+  windowSamples: 51,
+  /** Fall probability (sigmoid output) at/above which we trigger. */
+  threshold: 0.8,
+  /** Only run inference when a sample's magnitude exceeds this (g). */
+  gateG: 1.5,
+  /** Refractory period between model inferences. */
+  cooldownMs: 3_000,
+} as const;
+
+/**
  * Always-on rolling audio buffer. The mic continuously records short segments;
  * on a trigger we send the most recent buffered segment (the seconds BEFORE the
  * event) instead of recording silence after the fact.

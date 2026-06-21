@@ -34,8 +34,8 @@
       [
         "@sentry/react-native/expo",
         {
-          "organization": "REPLACE_WITH_SENTRY_ORG_SLUG",
-          "project": "REPLACE_WITH_SENTRY_CLIENT_PROJECT_SLUG"
+          "organization": "quietcare",
+          "project": "quitecareclient"
         }
       ]
     ],

@@ -197,6 +197,11 @@ side, anything in `/server`.
 - **Camera snapshot**: front-facing `expo-camera` preview captures a still at
   trigger time and attaches it as `frame_b64` (previously always null). Added
   camera permission + `expo-camera` config plugin.
+- **Unit tests** for the fall detector (`npm test`, Jest + ts-jest): impact +
+  stillness, continued-movement rejection, stillness-timer reset, pre-impact
+  stillness, and threshold sensitivity.
+- **SDK 52 dependency fixes**: `react-native@0.76.9`, `@sentry/react-native@6.10`
+  (required for EAS builds to succeed). EAS dev build wired up for Android.
 
 ### 0.2.0
 - Real on-device **fall detection**: threshold algorithm (impact spike +

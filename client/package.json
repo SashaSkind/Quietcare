@@ -9,7 +9,8 @@
     "web": "expo start --web",
     "mock": "node mock/server.js",
     "gen:audio": "node scripts/gen-audio.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "jest"
   },
   "dependencies": {
     "@sentry/react-native": "~6.10.0",
@@ -25,7 +26,10 @@
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
+    "@types/jest": "^29.5.14",
     "@types/react": "~18.3.12",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.4.11",
     "typescript": "~5.3.3"
   },
   "private": true

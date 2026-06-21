@@ -11,6 +11,7 @@ import { initSentry, Sentry } from './src/sentry';
 import { useQuietcare } from './src/hooks/useQuietcare';
 import { StatusBanner } from './src/components/StatusBanner';
 import { DebugLog } from './src/components/DebugLog';
+import { CameraCapture } from './src/camera/CameraCapture';
 
 initSentry();
 
@@ -21,6 +22,7 @@ function App() {
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar barStyle="light-content" />
+      <CameraCapture />
       <View style={styles.container}>
         <View style={styles.header}>
           <Text style={styles.title}>Quietcare</Text>

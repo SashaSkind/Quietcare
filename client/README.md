@@ -31,8 +31,13 @@ short event to the cloud backend over a WebSocket (protocol v1, see
   (records the mic for `duration_ms` and replies with `audio_response` carrying
   the same `prompt_id`). The buffer is paused during playback/listen and resumed
   after (the mic is shared).
+- **Camera snapshot:** a small always-mounted front camera (`expo-camera`)
+  captures a single still at trigger time, sent as `frame_b64` so the caretaker
+  can see the scene. Falls back to `null` if the camera/permission is
+  unavailable.
 - **Sentry:** crash/error reporting via `@sentry/react-native`, with breadcrumbs
-  for WebSocket + audio events. Raw audio payloads are never sent to Sentry.
+  for WebSocket + audio + camera events. Raw audio/image payloads are never sent
+  to Sentry.
 
 ## Stack
 
@@ -175,6 +180,7 @@ client/
     ws/WebSocketClient.ts  # resilient socket (register/heartbeat/reconnect)
     audio/audioManager.ts  # mic owner: rolling buffer + play + record
     sensors/               # accelerometer monitor + threshold detectFall
+    camera/                # CameraCapture view + cameraManager (frame_b64)
     components/            # StatusBanner, DebugLog
     hooks/useQuietcare.ts  # orchestration
     assets/sampleAudio.ts  # generated base64 WAV
@@ -186,6 +192,16 @@ Agents, LLM calls, Deepgram, Twilio, Redis, real fall-detection ML, the caretake
 side, anything in `/server`.
 
 ## CHANGELOG
+
+### 0.3.0
+- **Camera snapshot**: front-facing `expo-camera` preview captures a still at
+  trigger time and attaches it as `frame_b64` (previously always null). Added
+  camera permission + `expo-camera` config plugin.
+- **Unit tests** for the fall detector (`npm test`, Jest + ts-jest): impact +
+  stillness, continued-movement rejection, stillness-timer reset, pre-impact
+  stillness, and threshold sensitivity.
+- **SDK 52 dependency fixes**: `react-native@0.76.9`, `@sentry/react-native@6.10`
+  (required for EAS builds to succeed). EAS dev build wired up for Android.
 
 ### 0.2.0
 - Real on-device **fall detection**: threshold algorithm (impact spike +

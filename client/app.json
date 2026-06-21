@@ -2,6 +2,7 @@
   "expo": {
     "name": "Quietcare",
     "slug": "quietcare-client",
+    "owner": "sashas-team",
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
@@ -10,18 +11,26 @@
       "resizeMode": "contain",
       "backgroundColor": "#0f172a"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.quietcare.client",
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Quietcare records short audio clips during a check-in so a caretaker can confirm you are okay.",
-        "NSMotionUsageDescription": "Quietcare reads motion sensors to detect possible falls."
+        "NSMotionUsageDescription": "Quietcare reads motion sensors to detect possible falls.",
+        "NSCameraUsageDescription": "Quietcare captures a still photo when an emergency is detected so a caretaker can see the situation."
       }
     },
     "android": {
       "package": "com.quietcare.client",
-      "permissions": ["RECORD_AUDIO", "HIGH_SAMPLING_RATE_SENSORS"]
+      "permissions": [
+        "RECORD_AUDIO",
+        "MODIFY_AUDIO_SETTINGS",
+        "HIGH_SAMPLING_RATE_SENSORS",
+        "CAMERA"
+      ]
     },
     "plugins": [
       "expo-dev-client",
@@ -29,6 +38,12 @@
         "expo-av",
         {
           "microphonePermission": "Quietcare records short audio clips during a check-in so a caretaker can confirm you are okay."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Quietcare captures a still photo when an emergency is detected so a caretaker can see the situation."
         }
       ],
       [
@@ -41,7 +56,7 @@
     ],
     "extra": {
       "eas": {
-        "projectId": "REPLACE_WITH_EAS_PROJECT_ID"
+        "projectId": "2f55f876-34e8-4c36-8074-14b08444cb6d"
       }
     }
   }

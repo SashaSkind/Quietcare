@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from .protocol import (
@@ -155,6 +156,29 @@ async def handle_trigger(session: ElderSession, trigger: TriggerMessage) -> None
     # If the agent didn't escalate, resolve the check-in.
     await session.resolve()
     logger.info("FSM trace[%s]: %s", session.elder_id, session.fsm.trace())
+
+    # Persist a structured incident record regardless of which tools the LLM
+    # chose to call, so the caretaker history is always complete.
+    escalated = session.fsm.state in (
+        State.ESCALATING,
+        State.CARETAKER_NOTIFIED,
+        State.HUMAN_ACK,
+        State.GATED_911,
+    )
+    incident = {
+        "kind": "incident",
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "trigger_source": session.trigger_source,
+        "final_state": session.fsm.state.value,
+        "fsm_trace": session.fsm.trace(),
+        "escalated": escalated,
+        "last_transcript": session.last_transcript,
+        "summary": summary,
+    }
+    try:
+        await p.memory.log_event(session.elder_id, incident)
+    except Exception as exc:  # pragma: no cover - external store
+        logger.warning("incident persist failed (%s)", exc)
 
 
 class CaretakerService:

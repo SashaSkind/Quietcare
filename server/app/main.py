@@ -162,6 +162,22 @@ async def get_elder(elder_id: str) -> dict[str, object]:
     return {"elder_id": elder_id, "profile": profile}
 
 
+@app.get("/elders/{elder_id}/events")
+async def get_elder_events(
+    elder_id: str, kind: Optional[str] = None, limit: int = 50
+) -> dict[str, object]:
+    """Return the elder's logged event/incident history (most recent last).
+
+    Optional ``kind`` filter (e.g. ``incident``) and ``limit`` for the tail.
+    """
+    events = await app.state.providers.memory.get_events(elder_id)
+    if kind:
+        events = [e for e in events if isinstance(e, dict) and e.get("kind") == kind]
+    if limit and limit > 0:
+        events = events[-limit:]
+    return {"elder_id": elder_id, "count": len(events), "events": events}
+
+
 def _spawn(coro) -> None:
     task = asyncio.create_task(coro)
     app.state.bg_tasks.add(task)

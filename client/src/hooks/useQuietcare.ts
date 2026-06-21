@@ -8,6 +8,7 @@ import {
   playBase64Audio,
   recordAudioBase64,
 } from '../audio/audioManager';
+import { cameraManager } from '../camera/cameraManager';
 import { SAMPLE_AUDIO_B64 } from '../assets/sampleAudio';
 import { breadcrumb, captureException } from '../sentry';
 import type {
@@ -112,7 +113,7 @@ export function useQuietcare(): QuietcareState {
   );
 
   const sendTrigger = useCallback(
-    (source: TriggerSource) => {
+    async (source: TriggerSource) => {
       setStatus('checking_in');
       // Prefer the pre-trigger audio captured by the rolling buffer; fall back
       // to the bundled sample clip (e.g. on a simulator or if mic is denied).
@@ -124,6 +125,21 @@ export function useQuietcare(): QuietcareState {
           ? `trigger(${source}): sending ${audio_clip_b64.length} b64 chars of buffered pre-event audio`
           : `trigger(${source}): no buffered audio, using bundled sample`,
       );
+
+      // Grab a still snapshot for the caretaker (null if camera unavailable).
+      let frame_b64: string | null = null;
+      try {
+        frame_b64 = await cameraManager.captureFrameB64();
+      } catch (err) {
+        captureException(err, { stage: 'frame_capture', source });
+      }
+      addLog(
+        'info',
+        frame_b64
+          ? `trigger(${source}): captured camera frame (${frame_b64.length} b64 chars)`
+          : `trigger(${source}): no camera frame`,
+      );
+
       try {
         wsRef.current?.send({
           type: 'trigger',
@@ -131,7 +147,7 @@ export function useQuietcare(): QuietcareState {
           ts: new Date().toISOString(),
           trigger_source: source,
           audio_clip_b64,
-          frame_b64: null,
+          frame_b64,
           device_state: deviceState(),
         });
       } catch (err) {
@@ -144,7 +160,7 @@ export function useQuietcare(): QuietcareState {
   const simulateFall = useCallback(() => {
     breadcrumb('ui', 'simulate_fall_pressed');
     addLog('info', 'Simulate Fall pressed (manual override, bypasses detector)');
-    sendTrigger('manual');
+    void sendTrigger('manual');
   }, [addLog, sendTrigger]);
 
   useEffect(() => {
@@ -171,7 +187,7 @@ export function useQuietcare(): QuietcareState {
       },
       onFallDetected: () => {
         addLog('info', 'FALL DETECTED (impact + stillness) -> trigger');
-        sendTrigger('fall');
+        void sendTrigger('fall');
       },
     });
     accelRef.current = accel;

@@ -16,12 +16,13 @@
       "bundleIdentifier": "com.quietcare.client",
       "infoPlist": {
         "NSMicrophoneUsageDescription": "Quietcare records short audio clips during a check-in so a caretaker can confirm you are okay.",
-        "NSMotionUsageDescription": "Quietcare reads motion sensors to detect possible falls."
+        "NSMotionUsageDescription": "Quietcare reads motion sensors to detect possible falls.",
+        "NSCameraUsageDescription": "Quietcare captures a still photo when an emergency is detected so a caretaker can see the situation."
       }
     },
     "android": {
       "package": "com.quietcare.client",
-      "permissions": ["RECORD_AUDIO", "HIGH_SAMPLING_RATE_SENSORS"]
+      "permissions": ["RECORD_AUDIO", "HIGH_SAMPLING_RATE_SENSORS", "CAMERA"]
     },
     "plugins": [
       "expo-dev-client",
@@ -29,6 +30,12 @@
         "expo-av",
         {
           "microphonePermission": "Quietcare records short audio clips during a check-in so a caretaker can confirm you are okay."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Quietcare captures a still photo when an emergency is detected so a caretaker can see the situation."
         }
       ],
       [

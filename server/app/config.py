@@ -139,14 +139,33 @@ class Settings(BaseSettings):
         return bool(self.deepgram_api_key)
 
     @property
+    def yamnet_model_path_resolved(self) -> str:
+        """YAMNET_MODEL_PATH if set, else the repo-relative default
+        (server/models/yamnet.tflite). Keeps deploys portable across machines:
+        run scripts/fetch_yamnet.py and YAMNet is found with no .env path edits."""
+        import os
+
+        if self.yamnet_model_path:
+            return self.yamnet_model_path
+        server_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        return os.path.join(server_dir, "models", "yamnet.tflite")
+
+    @property
+    def yamnet_labels_path_resolved(self) -> str:
+        import os
+
+        if self.yamnet_labels_path:
+            return self.yamnet_labels_path
+        server_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        return os.path.join(server_dir, "models", "yamnet_class_map.csv")
+
+    @property
     def has_yamnet(self) -> bool:
         import os
 
         return bool(
-            self.yamnet_model_path
-            and self.yamnet_labels_path
-            and os.path.exists(self.yamnet_model_path)
-            and os.path.exists(self.yamnet_labels_path)
+            os.path.exists(self.yamnet_model_path_resolved)
+            and os.path.exists(self.yamnet_labels_path_resolved)
         )
 
     @property

@@ -125,7 +125,9 @@ def _try_yamnet(s: Settings) -> AudioScene | None:
     if not s.has_yamnet:
         return None
     try:
-        scene = YamnetAudioScene(s.yamnet_model_path, s.yamnet_labels_path)
+        scene = YamnetAudioScene(
+            s.yamnet_model_path_resolved, s.yamnet_labels_path_resolved
+        )
         logger.info("audio_scene: YAMNet model loaded")
         return scene
     except Exception as exc:

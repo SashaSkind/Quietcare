@@ -62,7 +62,13 @@ class TestMockAudioScene(unittest.IsolatedAsyncioTestCase):
 
 class TestFactorySelection(unittest.TestCase):
     def test_mock_when_no_model(self):
-        s = Settings(_env_file=None)
+        # Point at a nonexistent path so has_yamnet is False regardless of
+        # whether a model happens to be present in the repo's models/ dir.
+        s = Settings(
+            _env_file=None,
+            yamnet_model_path="/nonexistent/yamnet.tflite",
+            yamnet_labels_path="/nonexistent/class_map.csv",
+        )
         self.assertEqual(_build_audio_scene(s).name, "mock")
 
     def test_explicit_mock_backend(self):
@@ -70,12 +76,22 @@ class TestFactorySelection(unittest.TestCase):
         self.assertEqual(_build_audio_scene(s).name, "mock")
 
     def test_yamnet_backend_falls_back_to_mock_without_model(self):
-        s = Settings(_env_file=None, audio_scene_backend="yamnet")
+        s = Settings(
+            _env_file=None,
+            audio_scene_backend="yamnet",
+            yamnet_model_path="/nonexistent/yamnet.tflite",
+            yamnet_labels_path="/nonexistent/class_map.csv",
+        )
         self.assertEqual(_build_audio_scene(s).name, "mock")
 
     def test_both_backend_falls_back_to_mock_when_none_available(self):
-        # No YAMNet model configured and PANNs deps absent in test env -> mock.
-        s = Settings(_env_file=None, audio_scene_backend="both")
+        # No YAMNet model present and PANNs deps absent in test env -> mock.
+        s = Settings(
+            _env_file=None,
+            audio_scene_backend="both",
+            yamnet_model_path="/nonexistent/yamnet.tflite",
+            yamnet_labels_path="/nonexistent/class_map.csv",
+        )
         self.assertEqual(_build_audio_scene(s).name, "mock")
 
     def test_summary_includes_audio_scene(self):
@@ -176,7 +192,9 @@ class TestYamnetLive(unittest.IsolatedAsyncioTestCase):
         from app.providers.voice import DeepgramVoice
 
         s = Settings()
-        scene = YamnetAudioScene(s.yamnet_model_path, s.yamnet_labels_path)
+        scene = YamnetAudioScene(
+            s.yamnet_model_path_resolved, s.yamnet_labels_path_resolved
+        )
         # Use Deepgram TTS to produce a real WAV if available, else skip body.
         if s.has_deepgram:
             wav_b64 = await DeepgramVoice(s.deepgram_api_key).synthesize("hello there")

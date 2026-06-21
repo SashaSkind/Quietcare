@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { WS_URL, ELDER_ID } from '../config';
+import { WS_URL, ELDER_ID, INACTIVITY } from '../config';
 import { WebSocketClient } from '../ws/WebSocketClient';
 import type { ConnectionState } from '../ws/WebSocketClient';
 import { AccelerometerMonitor } from '../sensors/accelerometer';
+import { InactivityTracker } from '../sensors/inactivity';
+import { GeofenceMonitor } from '../sensors/geofence';
 import {
   audioManager,
   playBase64Audio,
@@ -14,9 +16,15 @@ import { breadcrumb, captureException } from '../sentry';
 import type {
   AppStatus,
   DeviceState,
+  GeoPoint,
   ServerMessage,
   TriggerSource,
 } from '../types';
+
+interface TriggerOpts {
+  note?: string;
+  location?: GeoPoint;
+}
 
 export interface LogEntry {
   id: number;
@@ -113,7 +121,7 @@ export function useQuietcare(): QuietcareState {
   );
 
   const sendTrigger = useCallback(
-    async (source: TriggerSource) => {
+    async (source: TriggerSource, opts: TriggerOpts = {}) => {
       setStatus('checking_in');
       // Prefer the pre-trigger audio captured by the rolling buffer; fall back
       // to the bundled sample clip (e.g. on a simulator or if mic is denied).
@@ -149,6 +157,8 @@ export function useQuietcare(): QuietcareState {
           audio_clip_b64,
           frame_b64,
           device_state: deviceState(),
+          note: opts.note ?? null,
+          location: opts.location ?? null,
         });
       } catch (err) {
         captureException(err, { stage: 'trigger', source });
@@ -176,9 +186,13 @@ export function useQuietcare(): QuietcareState {
     // Start the always-on rolling audio buffer so triggers carry pre-event audio.
     audioManager.startRollingBuffer();
 
+    // Inactivity / no-motion detector (fed by accelerometer samples, polled).
+    const inactivity = new InactivityTracker();
+
     const accel = new AccelerometerMonitor({
       onSample: (sample) => {
         setAccelMagnitude(sample.magnitude);
+        inactivity.observe(sample);
         const now = Date.now();
         if (now - lastAccelLogRef.current > 1000) {
           lastAccelLogRef.current = now;
@@ -193,9 +207,38 @@ export function useQuietcare(): QuietcareState {
     accelRef.current = accel;
     accel.start();
 
+    // Poll the inactivity tracker on a coarse interval; fire a check-in trigger
+    // when no expected motion is seen (possible silent emergency).
+    let inactivityTimer: ReturnType<typeof setInterval> | null = null;
+    if (INACTIVITY.enabled) {
+      inactivityTimer = setInterval(() => {
+        if (inactivity.check()) {
+          addLog('info', 'NO MOTION detected during active hours -> trigger');
+          void sendTrigger('inactivity', {
+            note: 'No expected motion detected during active hours.',
+          });
+        }
+      }, 60_000);
+    }
+
+    // Geofence / wandering monitor (graceful no-op without expo-location/home).
+    const geofence = new GeofenceMonitor({
+      onBreach: (location) => {
+        addLog('info', 'GEOFENCE breach (left safe zone) -> trigger');
+        void sendTrigger('geofence', {
+          note: 'Left the safe zone (possible wandering).',
+          location,
+        });
+      },
+      onLog: (m) => addLog('info', m),
+    });
+    void geofence.start();
+
     return () => {
       ws.close();
       accel.stop();
+      if (inactivityTimer) clearInterval(inactivityTimer);
+      geofence.stop();
       void audioManager.stopRollingBuffer();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

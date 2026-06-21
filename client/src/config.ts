@@ -59,6 +59,47 @@ export const FALL_MODEL = {
 } as const;
 
 /**
+ * Inactivity / no-motion detection. Absence of expected motion is a trigger we
+ * get almost for free from the accelerometer, and it catches silent emergencies
+ * (e.g. a stroke in bed) that a fall model misses. A sample counts as "motion"
+ * when |a| deviates from rest (~1g) by more than `motionBandG`. If no motion is
+ * seen for `noMotionMs` AND the local hour is within the expected-active window,
+ * we fire an `inactivity` trigger.
+ */
+export const INACTIVITY = {
+  /** Master switch. */
+  enabled: true,
+  /** Deviation from 1g that counts as real movement. */
+  motionBandG: 0.08,
+  /** No-motion duration that fires a check (default 60 min). */
+  noMotionMs: 60 * 60 * 1000,
+  /** Only fire during expected-active local hours [startHour, endHour). */
+  expectedActiveStartHour: 9,
+  expectedActiveEndHour: 21,
+  /** Refractory period between inactivity triggers. */
+  cooldownMs: 60 * 60 * 1000,
+} as const;
+
+/**
+ * Geofence / wandering detection (for dementia). When enabled and a home anchor
+ * is set, leaving the safe radius fires a `geofence` trigger with the location;
+ * the backend raises severity at night. Uses expo-location when available and is
+ * a graceful no-op otherwise.
+ */
+export const GEOFENCE = {
+  /** Master switch. */
+  enabled: false,
+  /** Home anchor; null until set by the caretaker during setup. */
+  home: null as { lat: number; lng: number } | null,
+  /** Safe radius in meters around home. */
+  radiusM: 150,
+  /** How often to poll location. */
+  pollMs: 60 * 1000,
+  /** Refractory period between geofence triggers. */
+  cooldownMs: 10 * 60 * 1000,
+} as const;
+
+/**
  * Always-on rolling audio buffer. The mic continuously records short segments;
  * on a trigger we send the most recent buffered segment (the seconds BEFORE the
  * event) instead of recording silence after the fact.

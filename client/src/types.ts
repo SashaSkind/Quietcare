@@ -1,12 +1,23 @@
 // WebSocket protocol v1 message types. Mirrors shared/protocol.md (read-only contract).
 
-export type TriggerSource = 'fall' | 'audio_event' | 'scheduled' | 'manual';
+export type TriggerSource =
+  | 'fall'
+  | 'audio_event'
+  | 'scheduled'
+  | 'manual'
+  | 'inactivity'
+  | 'geofence';
 
 export type Connectivity = 'wifi' | 'cellular' | 'offline' | 'unknown';
 
 export interface DeviceState {
   battery: number;
   connectivity: Connectivity;
+}
+
+export interface GeoPoint {
+  lat: number;
+  lng: number;
 }
 
 // ---- CLIENT -> BACKEND ----
@@ -24,6 +35,8 @@ export interface TriggerMessage {
   audio_clip_b64: string | null;
   frame_b64: string | null;
   device_state: DeviceState;
+  note?: string | null;
+  location?: GeoPoint | null;
 }
 
 export interface AudioResponseMessage {

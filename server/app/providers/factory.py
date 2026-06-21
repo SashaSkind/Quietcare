@@ -181,7 +181,7 @@ def _build_policy_gate(s: Settings) -> PolicyGate:
     blocked = s.blocked_action_set
     if blocked:
         logger.info("policy_gate: local (kill-switch blocking %s)", sorted(blocked))
-    return LocalPolicyGate(blocked)
+    return LocalPolicyGate(blocked, s.emergency_min_risk)
 
 
 def _build_security_scan(s: Settings) -> SecurityScanner:

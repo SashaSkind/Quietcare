@@ -83,7 +83,20 @@ class Settings(BaseSettings):
     # Local policy gate: in-code chokepoint that can physically block high-stakes
     # escalation actions ('escalation', 'emergency_dispatch'). Default allows;
     # policy_block_actions is a comma-separated kill-switch (e.g. "emergency_dispatch").
+    # The gate also computes a deterministic risk score (0-100); emergency_dispatch
+    # below emergency_min_risk is blocked unless human_confirmed is in context.
     policy_block_actions: str = ""
+    emergency_min_risk: int = 0
+
+    # Medication reminders: the scheduler tick interval (seconds) and how long to
+    # wait for a spoken confirmation before logging a missed dose.
+    med_tick_seconds: int = 60
+    med_confirm_window_ms: int = 8000
+
+    # Geofence / wandering: night-hours window (local 24h) during which leaving
+    # the safe zone is treated as higher severity.
+    night_start_hour: int = 22
+    night_end_hour: int = 6
 
     # Sentry
     sentry_dsn: str = ""

@@ -75,6 +75,25 @@ class Memory(ABC):
     async def get_device_token(self, elder_id: str) -> str | None:
         return await self.get(f"elder:{elder_id}:device_token")
 
+    # Medication schedule: list of {name, time "HH:MM", dose?}.
+    async def get_medications(self, elder_id: str) -> list[dict[str, Any]]:
+        return await self.get(f"elder:{elder_id}:medications") or []
+
+    async def set_medications(self, elder_id: str, meds: list[dict[str, Any]]) -> None:
+        await self.set(f"elder:{elder_id}:medications", meds)
+
+    # Inbound/outbound caretaker SMS thread: list of {role, text, ts}.
+    async def get_sms_thread(self, elder_id: str) -> list[dict[str, Any]]:
+        return await self.list(f"elder:{elder_id}:sms_thread")
+
+    async def append_sms_turn(self, elder_id: str, role: str, text: str) -> None:
+        from datetime import datetime, timezone
+
+        await self.append(
+            f"elder:{elder_id}:sms_thread",
+            {"role": role, "text": text, "ts": datetime.now(timezone.utc).isoformat()},
+        )
+
 
 class RedisMemory(Memory):
     name = "redis"

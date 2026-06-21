@@ -60,9 +60,10 @@ class MockBrowser(Browser):
 class BrowserbaseBrowser(Browser):
     """Provisions a Browserbase cloud session for a task.
 
-    A full computer-use run (driving a pharmacy portal via Playwright over the
-    session's CDP URL) would attach here; this integration creates the session
-    and returns its id + replay URL so the work is observable and resumable.
+    Creates a cloud session, then — when a ``pharmacy_url`` is provided and
+    Playwright is installed — connects over the session's CDP URL and drives the
+    page (navigate, find a refill control by text, click it, capture the result).
+    Without Playwright or a URL it gracefully returns the session id + replay URL.
     """
 
     name = "browserbase"
@@ -76,6 +77,7 @@ class BrowserbaseBrowser(Browser):
     async def run_task(self, task: str, context: Optional[dict] = None) -> BrowserTaskResult:
         import httpx
 
+        context = context or {}
         try:
             async with httpx.AsyncClient(timeout=20.0) as client:
                 resp = await client.post(
@@ -92,16 +94,22 @@ class BrowserbaseBrowser(Browser):
                 )
             data = resp.json()
             session_id = data.get("id")
+            connect_url = data.get("connectUrl") or data.get("connect_url")
             replay_url = (
                 f"https://www.browserbase.com/sessions/{session_id}"
                 if session_id else None
             )
             logger.info("Browserbase session %s created for task: %s", session_id, task)
-            # NOTE: page automation (Playwright over data['connectUrl']) would run
-            # here for a full refill flow; left as a follow-up so this stays robust.
+
+            detail = f"Browserbase session created for task: {task}"
+            pharmacy_url = context.get("pharmacy_url")
+            if pharmacy_url and connect_url:
+                nav_detail = await self._automate(connect_url, pharmacy_url, task)
+                detail = f"{detail}; {nav_detail}"
+
             return BrowserTaskResult(
                 ok=True,
-                detail=f"Browserbase session created for task: {task}",
+                detail=detail,
                 mocked=False,
                 session_id=session_id,
                 replay_url=replay_url,
@@ -109,3 +117,38 @@ class BrowserbaseBrowser(Browser):
         except Exception as exc:  # pragma: no cover - network
             logger.warning("Browserbase task failed (%s)", exc)
             return BrowserTaskResult(ok=False, detail=f"error: {exc}", mocked=False)
+
+    async def _automate(self, connect_url: str, pharmacy_url: str, task: str) -> str:
+        """Drive the live session via Playwright over CDP. Best-effort + defensive
+        so a portal hiccup never raises into the caller."""
+        try:
+            from playwright.async_api import async_playwright  # lazy, optional
+        except Exception:
+            return "playwright not installed; session-only (navigation skipped)"
+
+        try:
+            async with async_playwright() as pw:
+                browser = await pw.chromium.connect_over_cdp(connect_url)
+                context = browser.contexts[0] if browser.contexts else await browser.new_context()
+                page = context.pages[0] if context.pages else await context.new_page()
+                await page.goto(pharmacy_url, wait_until="domcontentloaded", timeout=30000)
+                title = await page.title()
+                # Heuristic: find a refill control by visible text.
+                clicked = False
+                for label in ("Refill", "Request refill", "Reorder", "Renew"):
+                    try:
+                        loc = page.get_by_text(label, exact=False).first
+                        if await loc.count() > 0:
+                            await loc.click(timeout=5000)
+                            clicked = True
+                            break
+                    except Exception:
+                        continue
+                await browser.close()
+                return (
+                    f"navigated to '{title}', refill control "
+                    + ("clicked" if clicked else "not found (manual review)")
+                )
+        except Exception as exc:
+            logger.warning("Browserbase automation error (%s)", exc)
+            return f"navigation error: {exc}"

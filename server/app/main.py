@@ -21,9 +21,19 @@ from fastapi import (
 from pydantic import BaseModel
 
 from .auth import provision_device, verify_device
-from .caretaker_query import resolve_elder_by_caretaker, summarize_for_caretaker
+from .caretaker_query import (
+    handle_inbound_sms,
+    prompt_elder_to_call,
+    summarize_for_caretaker,
+)
 from .config import settings
 from .confirmations import ConfirmationRegistry
+from .medications import (
+    MedicationService,
+    adherence_summary,
+    run_medication_reminder,
+)
+from .wellness import summarize_wellness
 from .protocol import (
     AudioResponseMessage,
     RegisterMessage,
@@ -66,10 +76,13 @@ async def lifespan(app: FastAPI):
     caretaker = CaretakerService(providers, registry, confirmations)
     caretaker.attach()
 
+    medications = MedicationService(providers, registry, settings)
+
     app.state.providers = providers
     app.state.registry = registry
     app.state.confirmations = confirmations
     app.state.caretaker = caretaker
+    app.state.medications = medications
     app.state.bg_tasks = set()
     logger.info("Quietcare backend up. providers=%s", providers.summary())
 
@@ -84,7 +97,12 @@ async def lifespan(app: FastAPI):
             )
         except Exception as exc:  # pragma: no cover - external
             logger.warning("startup security scan failed for %s (%s)", target, exc)
+
+    # Background medication-reminder scheduler.
+    med_task = asyncio.create_task(medications.run_forever())
+    app.state.bg_tasks.add(med_task)
     yield
+    med_task.cancel()
     logger.info("Quietcare backend shutting down.")
 
 
@@ -230,16 +248,10 @@ async def twilio_inbound_sms(
     sender's number, generates a warm recap from profile + recent incidents, and
     replies via TwiML. Read-only; off the emergency path."""
     providers = app.state.providers
-    question = Body.strip() or "How is she doing?"
+    body = Body.strip() or "How is she doing?"
     try:
-        elder_id = await resolve_elder_by_caretaker(providers.memory, From)
-        if elder_id is None:
-            return _twiml(
-                "This number isn't linked to a Quietcare resident yet. "
-                "Please contact support to connect your account."
-            )
-        recap = await summarize_for_caretaker(providers, elder_id, question)
-        return _twiml(recap)
+        reply = await handle_inbound_sms(providers, app.state.registry, From, body)
+        return _twiml(reply)
     except Exception as exc:
         capture(exc, where="twilio_inbound_sms", sender=From)
         logger.exception("inbound sms failed: %s", exc)
@@ -278,6 +290,85 @@ async def refill_medication(elder_id: str, body: RefillRequest) -> dict[str, obj
         {"elder_id": elder_id, "pharmacy_url": body.pharmacy_url},
     )
     return {"elder_id": elder_id, "task": res.to_dict()}
+
+
+# ---- Medication reminders + adherence ----------------------------------------
+
+class MedicationItem(BaseModel):
+    name: str
+    time: str  # "HH:MM"
+    dose: Optional[str] = None
+
+
+class MedicationSchedule(BaseModel):
+    medications: list[MedicationItem]
+
+
+async def _require_elder(elder_id: str):
+    providers = app.state.providers
+    if await providers.memory.get_profile(elder_id) is None:
+        raise HTTPException(status_code=404, detail="elder not found")
+    return providers
+
+
+@app.get("/elders/{elder_id}/medications")
+async def get_medications(elder_id: str) -> dict[str, object]:
+    providers = await _require_elder(elder_id)
+    meds = await providers.memory.get_medications(elder_id)
+    return {"elder_id": elder_id, "medications": meds}
+
+
+@app.put("/elders/{elder_id}/medications")
+async def set_medications(
+    elder_id: str, body: MedicationSchedule,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> dict[str, object]:
+    _check_admin(x_admin_token)
+    providers = await _require_elder(elder_id)
+    meds = [m.model_dump() for m in body.medications]
+    await providers.memory.set_medications(elder_id, meds)
+    return {"elder_id": elder_id, "medications": meds}
+
+
+@app.post("/elders/{elder_id}/medications/remind")
+async def remind_medication_now(elder_id: str, body: MedicationItem) -> dict[str, object]:
+    """Trigger a medication reminder immediately (manual/testing). Requires a
+    connected device; otherwise logs a missed dose."""
+    providers = await _require_elder(elder_id)
+    session = app.state.registry.get(elder_id)
+    if session is None:
+        raise HTTPException(status_code=409, detail="elder device not connected")
+    event = await run_medication_reminder(
+        session, body.model_dump(), settings.med_confirm_window_ms
+    )
+    return {"elder_id": elder_id, "event": event}
+
+
+@app.get("/elders/{elder_id}/adherence")
+async def get_adherence(elder_id: str) -> dict[str, object]:
+    providers = await _require_elder(elder_id)
+    events = await providers.memory.get_events(elder_id)
+    return {"elder_id": elder_id, "adherence": adherence_summary(events)}
+
+
+# ---- Wellness trends + call bridge -------------------------------------------
+
+@app.get("/elders/{elder_id}/wellness")
+async def get_wellness(elder_id: str, days: int = 7) -> dict[str, object]:
+    """Weekly wellness trend + warm summary for the caretaker."""
+    await _require_elder(elder_id)
+    return await summarize_wellness(app.state.providers, elder_id, days)
+
+
+@app.post("/elders/{elder_id}/call-bridge")
+async def call_bridge(elder_id: str) -> dict[str, object]:
+    """Two-way bridge: prompt the elder (over the voice loop) to call their
+    caretaker. Returns whether a connected, idle device was reached."""
+    providers = await _require_elder(elder_id)
+    profile = await providers.memory.get_profile(elder_id) or {}
+    caretaker_name = (profile.get("caretaker") or {}).get("name", "")
+    ok = await prompt_elder_to_call(app.state.registry, elder_id, caretaker_name)
+    return {"elder_id": elder_id, "prompted": ok}
 
 
 def _spawn(coro) -> None:

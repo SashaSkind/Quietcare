@@ -10,8 +10,20 @@ from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
-TriggerSource = Literal["fall", "audio_event", "scheduled", "manual"]
+TriggerSource = Literal[
+    "fall",
+    "audio_event",
+    "scheduled",
+    "manual",
+    "inactivity",  # no expected motion (possible silent emergency, e.g. stroke)
+    "geofence",  # left a safe zone / wandering (dementia)
+]
 BackendState = Literal["idle", "checking_in", "escalating", "resolved"]
+
+
+class GeoPoint(BaseModel):
+    lat: float
+    lng: float
 
 
 # ---- CLIENT -> BACKEND ----
@@ -35,6 +47,10 @@ class TriggerMessage(BaseModel):
     audio_clip_b64: Optional[str] = None
     frame_b64: Optional[str] = None
     device_state: DeviceState = Field(default_factory=DeviceState)
+    # Optional context for non-fall triggers (inactivity/geofence): a short
+    # human note and/or the device location at trigger time.
+    note: Optional[str] = None
+    location: Optional[GeoPoint] = None
 
 
 class AudioResponseMessage(BaseModel):

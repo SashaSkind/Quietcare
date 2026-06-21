@@ -25,7 +25,13 @@ ELDER_SYSTEM = (
     "If they clearly say they're fine and there's no acoustic distress, log the "
     "event and stop. If they don't respond clearly, indicate distress, or the "
     "audio shows a thud/scream with no reassuring reply, call "
-    "notify_caretaker_agent with severity and evidence. Never call 911 yourself."
+    "notify_caretaker_agent with severity and evidence. Never call 911 yourself.\n"
+    "Trigger types you may see: 'fall' (impact detected); 'inactivity' (no "
+    "expected motion — treat as a possible SILENT emergency like a stroke, do a "
+    "check-in, and escalate if there's no clear, coherent response); 'geofence' "
+    "(the person appears to have left a safe zone / may be wandering — they are "
+    "likely not near the device, so a voice check-in may go unanswered; notify "
+    "the caretaker, with HIGHER severity at night)."
 )
 
 ELDER_TOOLS: list[dict[str, Any]] = [
@@ -141,7 +147,8 @@ async def run_elder_agent(session: "ElderSession", llm: LLM) -> str:
             severity = args.get("severity", "high")
             summary = args.get("summary", "")
             evidence = args.get("evidence", {})
-            # ArmorIQ gate: an escalation may not fire without sanction.
+            # Policy gate: an escalation may not fire without sanction (the gate
+            # also computes a risk score from these signals).
             decision = await p.policy_gate.sanction(
                 "escalation",
                 {
@@ -149,6 +156,7 @@ async def run_elder_agent(session: "ElderSession", llm: LLM) -> str:
                     "severity": severity,
                     "summary": summary,
                     "trigger_source": session.trigger_source,
+                    "hard_fall": session.hard_fall,
                 },
             )
             if not decision.allowed:
@@ -172,10 +180,15 @@ async def run_elder_agent(session: "ElderSession", llm: LLM) -> str:
 
         return f"unknown tool: {name}"
 
+    context_bits = ""
+    if session.trigger_note:
+        context_bits += f" Note: {session.trigger_note}."
+    if session.trigger_location:
+        context_bits += f" Location: {json.dumps(session.trigger_location)}."
     user_prompt = (
         f"A '{session.trigger_source}' trigger just arrived for elder "
-        f"'{elder_id}'. Device state: {json.dumps(session.device_state)}. "
-        "Assess the situation and run a check-in."
+        f"'{elder_id}'. Device state: {json.dumps(session.device_state)}."
+        f"{context_bits} Assess the situation and run a check-in."
     )
     return await run_agent(
         llm=llm,

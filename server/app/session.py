@@ -37,6 +37,8 @@ class ElderSession:
         self.trigger_source = "manual"
         self.device_state: dict[str, Any] = {}
         self.hard_fall = False
+        self.trigger_note: Optional[str] = None
+        self.trigger_location: Optional[dict[str, Any]] = None
         self.trigger_transcript = ""
         self.last_transcript = ""
         self.acoustic_evidence: dict[str, Any] = {}
@@ -79,6 +81,26 @@ class ElderSession:
 
     async def send_listen(self, prompt_id: str, duration_ms: int) -> None:
         await self._send(ListenMessage(prompt_id=prompt_id, duration_ms=duration_ms))
+
+    async def speak(self, text: str) -> str:
+        """Synthesize + play a one-off spoken message (no FSM coupling). Used by
+        medication reminders and the call-me bridge."""
+        audio_b64 = await self.providers.voice.synthesize(text)
+        prompt_id = self.new_prompt_id()
+        await self.send_speak(prompt_id, audio_b64, text)
+        return prompt_id
+
+    async def speak_and_listen(self, text: str, duration_ms: int = 8000) -> str:
+        """Speak a message, then listen and return the transcript (FSM-free)."""
+        prompt_id = await self.speak(text)
+        await self.send_listen(prompt_id, duration_ms)
+        audio_b64 = await self.await_audio_response(prompt_id)
+        return await self.providers.voice.transcribe(audio_b64)
+
+    @property
+    def is_busy(self) -> bool:
+        """True while an incident is in flight (don't interrupt with reminders)."""
+        return self.fsm.state not in (State.IDLE, State.RESOLVED)
 
     # ---- check-in request/response correlation ----
     async def await_audio_response(self, prompt_id: str) -> Optional[str]:
@@ -141,8 +163,13 @@ async def handle_trigger(session: ElderSession, trigger: TriggerMessage) -> None
     session.reset_incident()
     session.trigger_source = trigger.trigger_source
     session.device_state = trigger.device_state.model_dump()
-    # Heuristic: an unambiguous hard fall may bypass the check-in requirement.
-    session.hard_fall = trigger.trigger_source == "fall"
+    session.trigger_note = trigger.note
+    session.trigger_location = (
+        trigger.location.model_dump() if trigger.location else None
+    )
+    # A hard fall or a geofence breach (the person isn't home to answer a voice
+    # check-in) may bypass the check-in requirement before escalation.
+    session.hard_fall = trigger.trigger_source in ("fall", "geofence")
 
     await session.send_ack("trigger")
     session.fsm.trigger()
@@ -239,11 +266,16 @@ async def confirm_911(
         logger.info("911 authorization REJECTED for %s", elder_id)
         return {"status": "rejected", "elder_id": elder_id}
 
-    # ArmorIQ gate: even after human approval, the emergency dispatch must be
-    # sanctioned by the policy gate before it can fire.
+    # Policy gate: even after human approval, the emergency dispatch must be
+    # sanctioned by the gate before it can fire.
     decision = await providers.policy_gate.sanction(
         "emergency_dispatch",
-        {"elder_id": elder_id, "reason": pc.reason, "summary": pc.summary},
+        {
+            "elder_id": elder_id,
+            "reason": pc.reason,
+            "summary": pc.summary,
+            "human_confirmed": True,
+        },
     )
     if not decision.allowed:
         logger.warning(

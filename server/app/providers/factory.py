@@ -113,7 +113,9 @@ def _build_telephony(s: Settings) -> Telephony:
 def _build_bus(s: Settings) -> MessageBus:
     if s.has_band:
         try:
-            return BandBus(s.band_api_key, s.band_rest_url)
+            return BandBus(
+                s.band_api_key, s.band_rest_url, mention_handle=s.band_elder_handle
+            )
         except Exception as exc:
             logger.warning("BAND init failed (%s); using in-process bus", exc)
     return InProcessBus()

@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 .env
+agent_config.yaml
 .pytest_cache/
 
 # Downloaded ML model artifacts (fetch via scripts/fetch_yamnet.sh)

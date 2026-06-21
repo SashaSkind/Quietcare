@@ -1,0 +1,25 @@
+# BAND credentials for the Quietcare @mention mesh (two agents).
+#
+# Copy to agent_config.yaml (gitignored) and fill in real values from
+# https://app.band.ai/agents:
+#
+#   cp agent_config.example.yaml agent_config.yaml
+#
+#   1. Agents -> New Agent -> External Agent. Create TWO agents, e.g. "Elder"
+#      and "Caretaker" (avoid generic names like "Agent"/"Bot").
+#   2. api_key: shown ONCE in the creation popup — copy it before closing.
+#   3. agent_id: the agent's UUID on its settings page.
+#
+# Both agents under the same owner are same-registry peers and discover each
+# other automatically (no contact request needed).
+#
+# The SDK reads agent_config.yaml from the directory you run the agent in (server/).
+#
+# Tip: you can reuse your existing BAND agent as the "elder" — put its UUID and
+# key here, and register just one new agent for "caretaker".
+elder:
+  agent_id: "4f78e8c1-1ef9-4b04-a55a-ae13f5782e6d"
+  api_key: "band_a_1782062415_iEsZoHPvmC60P6fKEaKkzSnU9Zr6eHPn"
+caretaker:
+  agent_id: "8d8890c3-b563-4b87-849e-61e33ca4eca2"
+  api_key: "band_a_1782062365_1bfFKxjnDAxZtXib8XD0dTJ1_OceO2xz"

@@ -60,6 +60,11 @@ class Settings(BaseSettings):
     band_base_url: str = ""
     band_rest_url: str = ""
     band_ws_url: str = ""
+    # Full @mention mesh: when set, the app (acting as its own BAND identity)
+    # posts each escalation into a room @mentioning this elder-agent handle (e.g.
+    # "a.skinderev/elder"), which then recruits the caretaker daemon. When empty,
+    # BandBus falls back to posting a silent event (no agent is woken).
+    band_elder_handle: str = ""
 
     # Emergency dispatch (gated 911 path). NEVER set this to a real PSAP/911
     # line in a demo; use a safe test number you control. When unset, emergency

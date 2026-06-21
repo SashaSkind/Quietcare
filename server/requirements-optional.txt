@@ -19,6 +19,10 @@ playwright>=1.40
 # these (or without ARIZE_SPACE_ID/ARIZE_API_KEY) tracing is a no-op.
 arize-otel>=0.7
 openinference-instrumentation-anthropic>=0.1
+# BAND @mention mesh: official band-sdk so the elder/caretaker agents connect as
+# first-class room participants and hand off via @mentions (app/band_mesh/).
+# Optional — the in-process bus + BandBus event mirror work without it.
+band-sdk[anthropic]>=1.0.0
 # PANNs CNN14 audio-scene backend (heavy: pulls torch). Optional — only needed
 # when AUDIO_SCENE_BACKEND=panns or both.
 panns-inference>=0.1.1

@@ -18,6 +18,7 @@ from fastapi import (
     WebSocket,
     WebSocketDisconnect,
 )
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .auth import provision_device, verify_device
@@ -111,6 +112,15 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Quietcare Backend", version="0.1.0", lifespan=lifespan)
+
+# Permit cross-origin calls from the in-app caretaker dashboard / web preview.
+# Dev-only wide-open policy; tighten for production.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health")
@@ -392,6 +402,40 @@ async def _authorized(websocket: WebSocket, msg) -> bool:
     logger.warning("auth failed for elder %s", msg.elder_id)
     await websocket.send_text(json.dumps({"type": "ack", "received": "auth_failed"}))
     return False
+
+
+class DemoIncidentRequest(BaseModel):
+    trigger_source: str = "fall"
+    escalated: bool = True
+    summary: Optional[str] = None
+    last_transcript: Optional[str] = None
+
+
+@app.post("/elders/{elder_id}/demo/incident")
+async def demo_incident(elder_id: str, body: DemoIncidentRequest) -> dict[str, object]:
+    """Demo helper: log an incident event (e.g. a fall the elder device
+    detected on-device) so it surfaces on the caretaker dashboard. This is NOT
+    the real WS/FSM escalation path — it's a lightweight bridge for the
+    on-device role-switching demo."""
+    from datetime import datetime, timezone
+
+    providers = await _require_elder(elder_id)
+    event = {
+        "kind": "incident",
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "trigger_source": body.trigger_source,
+        "final_state": "escalated" if body.escalated else "resolved",
+        "escalated": body.escalated,
+        "last_transcript": body.last_transcript or "",
+        "summary": body.summary
+        or (
+            "Fall detected on device; caretaker alerted."
+            if body.escalated
+            else "Fall check-in resolved on device."
+        ),
+    }
+    await providers.memory.log_event(elder_id, event)
+    return {"elder_id": elder_id, "event": event}
 
 
 @app.websocket("/ws")

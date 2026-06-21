@@ -2,7 +2,7 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Orb } from './Orb';
 import { FallPrompt } from './FallPrompt';
-import { useDemoMachine } from './useDemoMachine';
+import { useDemoMachine, type DemoMachine } from './useDemoMachine';
 import { theme } from './theme';
 import type { DemoState, OrbMode } from './types';
 
@@ -33,8 +33,11 @@ function caption(state: DemoState): { title: string; sub: string } {
   }
 }
 
-export function DemoScreen() {
-  const m = useDemoMachine();
+export function DemoScreen({ machine }: { machine?: DemoMachine } = {}) {
+  // Allow an external machine (e.g. ElderScreen wiring real fall detection) to
+  // be injected; otherwise the screen is self-contained for design previews.
+  const internal = useDemoMachine();
+  const m = machine ?? internal;
   const mode = orbMode(m.state);
   const cap = caption(m.state);
   const urgent = mode === 'urgent';

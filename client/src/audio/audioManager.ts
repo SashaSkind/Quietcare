@@ -1,5 +1,8 @@
 import { Audio } from 'expo-av';
-import * as FileSystem from 'expo-file-system';
+// SDK 54 moved the classic file-system API (cacheDirectory, EncodingType,
+// readAsStringAsync, ...) to the /legacy entry point. Use it here to keep the
+// existing rolling-buffer/audio logic unchanged.
+import * as FileSystem from 'expo-file-system/legacy';
 import { AUDIO_BUFFER } from '../config';
 import { breadcrumb, captureException } from '../sentry';
 

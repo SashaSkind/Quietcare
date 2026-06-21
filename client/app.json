@@ -64,7 +64,8 @@
         }
       ],
       "expo-asset",
-      "react-native-fast-tflite"
+      "react-native-fast-tflite",
+      "@sentry/react-native"
     ],
     "extra": {
       "eas": {

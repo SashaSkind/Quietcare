@@ -155,6 +155,11 @@ export const careApi = {
   remindNow: (med: MedicationItem, id = ELDER_ID) =>
     postJson<{ event: MedicationEvent }>(`/elders/${id}/medications/remind`, med),
 
+  // Elder-side: transcribe a recorded check-in clip via the backend voice
+  // provider (Deepgram when live) so the hybrid flow can hear a spoken reply.
+  transcribe: (audioClipB64: string) =>
+    postJson<{ transcript: string }>(`/voice/transcribe`, { audio_clip_b64: audioClipB64 }),
+
   // Elder-side: report an on-device fall so it surfaces on the dashboard.
   reportIncident: (
     body: { trigger_source?: string; escalated?: boolean; summary?: string; last_transcript?: string },

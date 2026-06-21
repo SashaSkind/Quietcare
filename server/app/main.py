@@ -385,6 +385,19 @@ async def call_bridge(elder_id: str) -> dict[str, object]:
     return {"elder_id": elder_id, "prompted": ok}
 
 
+class TranscribeRequest(BaseModel):
+    audio_clip_b64: Optional[str] = None
+
+
+@app.post("/voice/transcribe")
+async def transcribe_clip(body: TranscribeRequest) -> dict[str, object]:
+    """Transcribe a base64 audio clip via the configured voice provider
+    (Deepgram when live, mock otherwise). Used by the on-device hybrid check-in
+    to hear the elder's spoken response without the full WS/FSM session."""
+    transcript = await app.state.providers.voice.transcribe(body.audio_clip_b64)
+    return {"transcript": transcript}
+
+
 def _spawn(coro) -> None:
     task = asyncio.create_task(coro)
     app.state.bg_tasks.add(task)

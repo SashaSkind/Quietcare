@@ -6,8 +6,13 @@ import { DemoScreen } from '../design/DemoScreen';
 import { useDemoMachine } from '../design/useDemoMachine';
 import { theme } from '../design/theme';
 import { useFallSensor } from './useFallSensor';
+import { recordAudioBase64 } from '../audio/audioManager';
 import { careApi } from '../caretaker/api';
 import type { DemoUser } from '../app/session';
+
+// Classify a spoken check-in reply. Help wins over OK for safety.
+const HELP_RE = /\b(help|can'?t|cannot|hurt|emergency|fell|fall|stuck)\b/i;
+const OK_RE = /\b(ok|okay|fine|good|yes|yeah|yep|alright|all right|great)\b/i;
 
 // Elder experience: the Halo companion screen driven by a real, on-device
 // accelerometer fall detector. A detected fall (impact + stillness) triggers
@@ -19,6 +24,9 @@ export function ElderScreen({ user, onLogout }: { user: DemoUser; onLogout: () =
   const [lastFall, setLastFall] = useState<number | null>(null);
   const [voice, setVoice] = useState('');
   const reportedFor = useRef<string>('');
+  // Latest state, readable inside the async listen flow without stale closures.
+  const stateRef = useRef(machine.state);
+  stateRef.current = machine.state;
 
   // Allow the spoken check-in to be heard even with the iOS mute switch on.
   // Set a full playback session so AVSpeechSynthesizer routes to the speaker.
@@ -80,6 +88,65 @@ export function ElderScreen({ user, onLogout }: { user: DemoUser; onLogout: () =
     } else if (s === 'idle') {
       reportedFor.current = '';
     }
+  }, [machine.state]);
+
+  // Hybrid check-in: while the prompt is up, also LISTEN. Record after the
+  // spoken question finishes (so we don't transcribe our own TTS), transcribe
+  // via the backend (Deepgram), and resolve/escalate on the reply. The tap
+  // buttons stay active — whichever resolves first wins.
+  useEffect(() => {
+    if (machine.state !== 'checking_in') return;
+    let cancelled = false;
+    const stillChecking = () => !cancelled && stateRef.current === 'checking_in';
+
+    (async () => {
+      setVoice('listening…');
+      // Wait for the spoken prompt to finish (poll up to ~3s).
+      for (let i = 0; i < 12; i++) {
+        let speaking = false;
+        try {
+          speaking = await Speech.isSpeakingAsync();
+        } catch {
+          // ignore
+        }
+        if (!speaking || cancelled) break;
+        await new Promise((r) => setTimeout(r, 250));
+      }
+      if (!stillChecking()) return;
+
+      let clip = '';
+      try {
+        clip = await recordAudioBase64(5000);
+      } catch {
+        if (!cancelled) setVoice('mic unavailable — tap to respond');
+        return;
+      }
+      // Recording switched the session to record mode; restore playback so the
+      // resolved/escalation prompts are audible.
+      Audio.setAudioModeAsync({
+        playsInSilentModeIOS: true,
+        allowsRecordingIOS: false,
+        interruptionModeIOS: InterruptionModeIOS.DuckOthers,
+      }).catch(() => {});
+      if (!stillChecking()) return;
+
+      let transcript = '';
+      try {
+        transcript = (await careApi.transcribe(clip)).transcript || '';
+      } catch {
+        // ignore — fall back to tap / countdown
+      }
+      if (!stillChecking()) return;
+      setVoice(transcript ? `heard: “${transcript}”` : 'no reply heard');
+      if (HELP_RE.test(transcript)) machine.callForHelp();
+      else if (OK_RE.test(transcript)) machine.confirmOk();
+      // else: let the countdown escalate naturally.
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [machine.state]);
 
   const armed = machine.state === 'idle';

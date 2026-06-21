@@ -102,6 +102,10 @@ class RedisMemory(Memory):
         existing = await self.get_profile(SAMPLE_ELDER["elder_id"])
         if existing is None:
             await self.set_profile(SAMPLE_ELDER["elder_id"], SAMPLE_ELDER)
+        else:
+            # Profile predates the elder index (older deployments); ensure it's
+            # listed so multi-elder endpoints surface it.
+            await self._index_elder(SAMPLE_ELDER["elder_id"])
 
 
 class MockMemory(Memory):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import TYPE_CHECKING, Any
 
 from ..providers.llm import LLM
@@ -10,6 +11,8 @@ from .base import run_agent
 
 if TYPE_CHECKING:
     from ..session import ElderSession
+
+logger = logging.getLogger("quietcare.agent.elder")
 
 ELDER_SYSTEM = (
     "You are Quietcare's elder-agent, a calm, caring safety companion for an "
@@ -138,6 +141,23 @@ async def run_elder_agent(session: "ElderSession", llm: LLM) -> str:
             severity = args.get("severity", "high")
             summary = args.get("summary", "")
             evidence = args.get("evidence", {})
+            # ArmorIQ gate: an escalation may not fire without sanction.
+            decision = await p.policy_gate.sanction(
+                "escalation",
+                {
+                    "elder_id": elder_id,
+                    "severity": severity,
+                    "summary": summary,
+                    "trigger_source": session.trigger_source,
+                },
+            )
+            if not decision.allowed:
+                logger.warning(
+                    "escalation BLOCKED by policy gate for %s: %s",
+                    elder_id,
+                    decision.reason,
+                )
+                return f"BLOCKED by policy gate: {decision.reason}"
             await session.escalate(hard_fall=session.hard_fall)
             await p.bus.publish(
                 {

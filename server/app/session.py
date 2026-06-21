@@ -239,6 +239,24 @@ async def confirm_911(
         logger.info("911 authorization REJECTED for %s", elder_id)
         return {"status": "rejected", "elder_id": elder_id}
 
+    # ArmorIQ gate: even after human approval, the emergency dispatch must be
+    # sanctioned by the policy gate before it can fire.
+    decision = await providers.policy_gate.sanction(
+        "emergency_dispatch",
+        {"elder_id": elder_id, "reason": pc.reason, "summary": pc.summary},
+    )
+    if not decision.allowed:
+        logger.warning(
+            "emergency dispatch BLOCKED by policy gate for %s: %s",
+            elder_id,
+            decision.reason,
+        )
+        return {
+            "status": "blocked_by_policy",
+            "elder_id": elder_id,
+            "reason": decision.reason,
+        }
+
     session = registry.get(elder_id)
     if session is not None:
         session.fsm.gate_911(human_confirmed=True)

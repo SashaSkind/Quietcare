@@ -72,6 +72,14 @@ class Settings(BaseSettings):
     browserbase_api_key: str = ""
     browserbase_project_id: str = ""
 
+    # Policy gate (ArmorIQ): sanctions high-stakes escalation actions (caretaker
+    # escalation, 911 dispatch). When unset, a mock allow-all gate is used.
+    # armoriq_fail_open: if ArmorIQ is unreachable, True lets actions proceed
+    # (a gate outage never blocks reaching help), False blocks (strict).
+    armoriq_api_key: str = ""
+    armoriq_base_url: str = ""
+    armoriq_fail_open: bool = True
+
     # Sentry
     sentry_dsn: str = ""
 
@@ -130,6 +138,10 @@ class Settings(BaseSettings):
     @property
     def has_browserbase(self) -> bool:
         return bool(self.browserbase_api_key and self.browserbase_project_id)
+
+    @property
+    def has_armoriq(self) -> bool:
+        return bool(self.armoriq_api_key and self.armoriq_base_url)
 
     @property
     def has_sentry(self) -> bool:

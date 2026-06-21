@@ -15,6 +15,7 @@ from .audio_scene import (
 )
 from .browser import Browser, BrowserbaseBrowser, MockBrowser
 from .bus import BandBus, InProcessBus, MessageBus
+from .policy_gate import ArmorIQPolicyGate, MockPolicyGate, PolicyGate
 from .llm import LLM, AnthropicLLM, MockLLM
 from .memory import Memory, MockMemory, RedisMemory
 from .telephony import MockTelephony, Telephony, TwilioTelephony
@@ -34,6 +35,7 @@ class Providers:
     # always supplies a concrete instance.
     audio_scene: AudioScene = field(default_factory=MockAudioScene)
     browser: Browser = field(default_factory=MockBrowser)
+    policy_gate: PolicyGate = field(default_factory=MockPolicyGate)
 
     def summary(self) -> dict[str, str]:
         return {
@@ -44,6 +46,7 @@ class Providers:
             "bus": self.bus.name,
             "audio_scene": self.audio_scene.name,
             "browser": self.browser.name,
+            "policy_gate": self.policy_gate.name,
         }
 
 
@@ -171,6 +174,18 @@ def _build_browser(s: Settings) -> Browser:
     return MockBrowser()
 
 
+def _build_policy_gate(s: Settings) -> PolicyGate:
+    if s.has_armoriq:
+        try:
+            logger.info("policy_gate: ArmorIQ enabled (fail_open=%s)", s.armoriq_fail_open)
+            return ArmorIQPolicyGate(
+                s.armoriq_api_key, s.armoriq_base_url, s.armoriq_fail_open
+            )
+        except Exception as exc:
+            logger.warning("ArmorIQ init failed (%s); using mock policy gate", exc)
+    return MockPolicyGate()
+
+
 def build_providers(s: Settings) -> Providers:
     providers = Providers(
         llm=_build_llm(s),
@@ -180,6 +195,7 @@ def build_providers(s: Settings) -> Providers:
         bus=_build_bus(s),
         audio_scene=_build_audio_scene(s),
         browser=_build_browser(s),
+        policy_gate=_build_policy_gate(s),
     )
     logger.info("providers: %s", providers.summary())
     return providers

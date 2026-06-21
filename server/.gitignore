@@ -3,3 +3,8 @@ __pycache__/
 *.pyc
 .env
 .pytest_cache/
+
+# Downloaded ML model artifacts (fetch via scripts/fetch_yamnet.sh)
+models/
+*.tflite
+*.pth

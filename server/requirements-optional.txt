@@ -9,6 +9,7 @@ sentry-sdk[fastapi]>=2.0
 httpx>=0.27  # used by the BAND message-bus client
 numpy>=1.24  # audio decode/resample for YAMNet/PANNs
 ai-edge-litert>=1.0  # TFLite runtime for YAMNet (or use tflite-runtime)
+kagglehub>=0.3  # used by scripts/fetch_yamnet.py to pull the YAMNet TFLite model
 # PANNs CNN14 audio-scene backend (heavy: pulls torch). Optional — only needed
 # when AUDIO_SCENE_BACKEND=panns or both.
 panns-inference>=0.1.1

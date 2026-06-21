@@ -3,7 +3,11 @@ import { WS_URL, ELDER_ID } from '../config';
 import { WebSocketClient } from '../ws/WebSocketClient';
 import type { ConnectionState } from '../ws/WebSocketClient';
 import { AccelerometerMonitor } from '../sensors/accelerometer';
-import { playBase64Audio, recordAudioBase64 } from '../audio/audioManager';
+import {
+  audioManager,
+  playBase64Audio,
+  recordAudioBase64,
+} from '../audio/audioManager';
 import { SAMPLE_AUDIO_B64 } from '../assets/sampleAudio';
 import { breadcrumb, captureException } from '../sentry';
 import type {
@@ -110,13 +114,23 @@ export function useQuietcare(): QuietcareState {
   const sendTrigger = useCallback(
     (source: TriggerSource) => {
       setStatus('checking_in');
+      // Prefer the pre-trigger audio captured by the rolling buffer; fall back
+      // to the bundled sample clip (e.g. on a simulator or if mic is denied).
+      const buffered = audioManager.getRecentAudioB64();
+      const audio_clip_b64 = buffered ?? SAMPLE_AUDIO_B64;
+      addLog(
+        'info',
+        buffered
+          ? `trigger(${source}): sending ${audio_clip_b64.length} b64 chars of buffered pre-event audio`
+          : `trigger(${source}): no buffered audio, using bundled sample`,
+      );
       try {
         wsRef.current?.send({
           type: 'trigger',
           elder_id: ELDER_ID,
           ts: new Date().toISOString(),
           trigger_source: source,
-          audio_clip_b64: SAMPLE_AUDIO_B64,
+          audio_clip_b64,
           frame_b64: null,
           device_state: deviceState(),
         });
@@ -124,12 +138,12 @@ export function useQuietcare(): QuietcareState {
         captureException(err, { stage: 'trigger', source });
       }
     },
-    [],
+    [addLog],
   );
 
   const simulateFall = useCallback(() => {
     breadcrumb('ui', 'simulate_fall_pressed');
-    addLog('info', 'Simulate Fall pressed (bypasses detectFall stub)');
+    addLog('info', 'Simulate Fall pressed (manual override, bypasses detector)');
     sendTrigger('manual');
   }, [addLog, sendTrigger]);
 
@@ -143,6 +157,9 @@ export function useQuietcare(): QuietcareState {
     wsRef.current = ws;
     ws.connect();
 
+    // Start the always-on rolling audio buffer so triggers carry pre-event audio.
+    audioManager.startRollingBuffer();
+
     const accel = new AccelerometerMonitor({
       onSample: (sample) => {
         setAccelMagnitude(sample.magnitude);
@@ -153,7 +170,7 @@ export function useQuietcare(): QuietcareState {
         }
       },
       onFallDetected: () => {
-        addLog('info', 'detectFall() returned true');
+        addLog('info', 'FALL DETECTED (impact + stillness) -> trigger');
         sendTrigger('fall');
       },
     });
@@ -163,6 +180,7 @@ export function useQuietcare(): QuietcareState {
     return () => {
       ws.close();
       accel.stop();
+      void audioManager.stopRollingBuffer();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

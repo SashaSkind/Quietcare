@@ -15,14 +15,22 @@ short event to the cloud backend over a WebSocket (protocol v1, see
   caretaker…*), a big **Simulate Fall** button, and a scrolling debug log.
 - **Resilient WebSocket client:** sends `register` on connect, `heartbeat` every
   30s, auto-reconnects with exponential backoff, logs every message in/out.
-- **Simulate Fall** → sends a valid `trigger` (`trigger_source: "manual"`) with a
-  bundled sample WAV as `audio_clip_b64`.
+- **On-device fall detection:** `expo-sensors` accelerometer at ~50 Hz feeds a
+  threshold detector (`detectFall`) that looks for an **impact spike** followed
+  by a **stillness window** across a ~2.5 s sliding buffer. A detected fall fires
+  the same trigger path with `trigger_source: "fall"`; a refractory cooldown
+  prevents repeat triggers. Thresholds live in `FALL_DETECTION` in
+  `src/config.ts`.
+- **Simulate Fall** stays as a **manual override** → `trigger` with
+  `trigger_source: "manual"`, bypassing the detector.
+- **Rolling audio buffer (always-on = buffer, not upload):** the mic
+  continuously records short segments into an on-device ring buffer. When a
+  trigger fires, the **preceding** seconds of audio are sent as `audio_clip_b64`
+  — not silence captured after the fact. Configurable via `AUDIO_BUFFER`.
 - **Check-in flow:** handles `speak` (plays audio via `expo-av`) then `listen`
   (records the mic for `duration_ms` and replies with `audio_response` carrying
-  the same `prompt_id`).
-- **Accelerometer:** subscribes via `expo-sensors` at ~50 Hz, computes signal
-  magnitude, streams it to the debug log. A stubbed `detectFall()` always returns
-  `false` for now (real TFLite model comes later). Simulate Fall bypasses it.
+  the same `prompt_id`). The buffer is paused during playback/listen and resumed
+  after (the mic is shared).
 - **Sentry:** crash/error reporting via `@sentry/react-native`, with breadcrumbs
   for WebSocket + audio events. Raw audio payloads are never sent to Sentry.
 
@@ -71,19 +79,66 @@ npm start            # ws://0.0.0.0:8080/ws
 It accepts `register`/`trigger`, replies with `speak` then `listen`, prints the
 received `audio_response`, and sends `status` updates.
 
-## Run the client (dev build)
+## Build & install on Android (EAS development build)
+
+Expo Go is **not** enough — native audio capture, the rolling buffer, and
+on-device sensors need a custom **development build**. Steps to get one onto a
+real Android device:
 
 ```bash
 cd client
+npm install
+npm install -g eas-cli        # if not already installed
 
-# 1) Create a development build (first time / when native deps change)
+# 1) Log in to your Expo account (creates the cloud build).
+eas login
+eas whoami                    # confirm you're logged in
+
+# 2) Link this project to an EAS project (writes extra.eas.projectId in app.json).
+eas init                      # accept creating/selecting a project
+
+# 3) Kick off the Android development build (cloud build, ~10-20 min).
 eas build --profile development --platform android
-#   install the resulting .apk on your emulator/device, OR run locally:
-#   npx expo run:android   (requires local Android toolchain)
-
-# 2) Start the dev server and open the dev build
-npm start            # then press 'a' for Android, or scan in the dev build
 ```
+
+When the build finishes, the CLI prints a URL (also on https://expo.dev under
+your project → Builds).
+
+**Install the APK on an Android phone (any of these):**
+
+- **Easiest:** open the build URL on the phone (or scan the QR the CLI shows) and
+  tap **Install**. Approve "install from unknown sources" if prompted.
+- **Via adb (USB):** download the `.apk`, enable USB debugging on the phone, then
+  `adb install ./your-build.apk`.
+- **Emulator:** drag the `.apk` onto a running Android emulator window, or
+  `adb install` it.
+
+**Run it against the dev server:**
+
+```bash
+cd client
+npm start                     # Metro for the dev build (expo start --dev-client)
+```
+
+Open the installed **Quietcare (dev)** app on the phone; it connects to Metro
+(same Wi-Fi). On first launch, **grant microphone permission** — the rolling
+audio buffer needs it.
+
+> **Local alternative (no EAS account):** with Android Studio + SDK installed,
+> `npx expo run:android` builds and installs a dev build directly from your
+> machine.
+
+### Verifying native audio + background-style capture on the device
+
+1. Grant mic permission; watch the debug log for `accel |a|` lines (~1/sec).
+2. With the mock backend reachable (set `EXPO_PUBLIC_WS_URL` to your LAN IP),
+   press **Simulate Fall**. The log should say it's sending **buffered
+   pre-event audio** (non-trivial byte count), and the mock prints an
+   `audio_response`.
+3. **Real fall test:** with the phone in hand, sharply drop-and-rest it on a
+   cushion (a hard impact followed by stillness). The detector should log
+   `FALL DETECTED` and fire a `fall` trigger. Tune sensitivity via
+   `FALL_DETECTION` in `src/config.ts`.
 
 Point `EXPO_PUBLIC_WS_URL` at the mock (or the real backend once it exists).
 
@@ -118,8 +173,8 @@ client/
     types.ts               # protocol v1 message types
     sentry.ts              # Sentry init + helpers
     ws/WebSocketClient.ts  # resilient socket (register/heartbeat/reconnect)
-    audio/audioManager.ts  # play + record (expo-av + expo-file-system)
-    sensors/               # accelerometer monitor + detectFall stub
+    audio/audioManager.ts  # mic owner: rolling buffer + play + record
+    sensors/               # accelerometer monitor + threshold detectFall
     components/            # StatusBanner, DebugLog
     hooks/useQuietcare.ts  # orchestration
     assets/sampleAudio.ts  # generated base64 WAV
@@ -131,6 +186,18 @@ Agents, LLM calls, Deepgram, Twilio, Redis, real fall-detection ML, the caretake
 side, anything in `/server`.
 
 ## CHANGELOG
+
+### 0.2.0
+- Real on-device **fall detection**: threshold algorithm (impact spike +
+  stillness over a ~2.5 s sliding window @ 50 Hz) with a refractory cooldown;
+  detected falls fire `trigger_source: "fall"`. Simulate Fall remains a manual
+  override. Tunables in `FALL_DETECTION` (`src/config.ts`).
+- **Rolling audio buffer**: the mic continuously records short segments into an
+  on-device ring buffer; triggers now send the *preceding* seconds of audio
+  instead of post-event silence. `AudioManager` serializes mic access (buffer
+  pauses during playback/listen). Tunables in `AUDIO_BUFFER`.
+- README: full EAS development-build + Android install + device-verification
+  steps.
 
 ### 0.1.0
 - Initial client scaffold: single-screen UI (status banner, Simulate Fall,

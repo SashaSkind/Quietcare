@@ -24,8 +24,9 @@ logger = logging.getLogger("quietcare.audio_scene")
 # case-insensitively as substrings against the model's class labels.
 DISTRESS_LABELS = (
     "scream", "shout", "yell", "groan", "grunt", "crying", "sob", "wail",
-    "moan", "gasp", "thud", "thump", "bang", "slam", "glass", "shatter",
-    "breaking", "fall", "whimper", "choking", "cough", "gagging",
+    "moan", "gasp", "thud", "thump", "bang", "slam", "gunshot", "gunfire",
+    "explosion", "firecracker", "fireworks", "glass", "shatter", "breaking",
+    "fall", "whimper", "choking", "cough", "gagging",
 )
 
 # Threshold above which a distress label is considered "present".

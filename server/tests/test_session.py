@@ -100,7 +100,7 @@ class TestAudioResponseCorrelation(unittest.IsolatedAsyncioTestCase):
         task = asyncio.create_task(responder())
         result = await s.await_audio_response("p1")
         await task
-        self.assertEqual(result, "AUDIO")
+        self.assertEqual(result, {"audio_b64": "AUDIO", "transcript": None})
 
     async def test_stale_response_is_ignored(self):
         s, _ = _session()

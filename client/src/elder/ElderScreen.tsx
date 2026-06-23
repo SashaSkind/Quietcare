@@ -1,172 +1,34 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { audioManager } from '../audio/audioManager';
 import { DemoScreen } from '../design/DemoScreen';
-import { useDemoMachine } from '../design/useDemoMachine';
 import { theme } from '../design/theme';
-import { useFallSensor } from './useFallSensor';
-import { careApi, type AudioSceneResult } from '../caretaker/api';
 import type { DemoUser } from '../app/session';
+import type { AudioProbeResultMessage } from '../types';
+import { useFallSensor } from './useFallSensor';
+import { useElderWebSocket } from './useElderWebSocket';
 
-// Elder experience: the Halo companion screen driven by a real, on-device
-// accelerometer fall detector. A detected fall (impact + stillness) triggers
-// the same check-in/escalation flow as the "Simulate Fall" button, and the
-// outcome is reported to the backend so the caretaker dashboard reflects it.
-export function ElderScreen({ user, onLogout }: { user: DemoUser; onLogout: () => void }) {
-  const machine = useDemoMachine();
+type AudioSceneResult = AudioProbeResultMessage['audio_scene'];
+
+export function ElderScreen({ onLogout }: { user: DemoUser; onLogout: () => void }) {
+  const { machine, connection, voice, agentMode, scene, sendFallTrigger } = useElderWebSocket();
   const [mag, setMag] = useState(1);
   const [lastFall, setLastFall] = useState<number | null>(null);
-  const [voice, setVoice] = useState('');
-  const [agentMode, setAgentMode] = useState('Agent asleep · say “Hey Quietcare”');
-  const [scene, setScene] = useState<AudioSceneResult | null>(null);
-  const reportedFor = useRef<string>('');
-  const machineRef = useRef(machine);
-  const transcribingRef = useRef(false);
-  const conversingRef = useRef(false);
-  const transcriptRef = useRef('');
 
-  useEffect(() => {
-    machineRef.current = machine;
-  });
-
-  // Allow the spoken check-in to be heard even with the iOS mute switch on.
-  // Set a full playback session so AVSpeechSynthesizer routes to the speaker.
-  useEffect(() => {
-    let active = true;
-    const unsubscribe = audioManager.onAudioSegment((audio_clip_b64) => {
-      if (transcribingRef.current) return;
-      transcribingRef.current = true;
-      careApi
-        .transcribeAudio({ audio_clip_b64 })
-        .then(({ transcript, wants_attention, audio_scene }) => {
-          if (!active) return;
-          setScene(audio_scene);
-          const heard = transcript.trim();
-          const sceneText = formatAudioScene(audio_scene);
-          if (!heard) {
-            if (sceneText) setVoice(`YAMNet: ${sceneText}`);
-            return;
-          }
-          transcriptRef.current = heard;
-          const intent = speechIntent(heard);
-          const current = machineRef.current;
-          if (current.state === 'checking_in' && intent === 'ok') {
-            setAgentMode('Check-in resolved by voice');
-            current.confirmOk();
-            return;
-          }
-          if (current.state === 'checking_in' && intent === 'help') {
-            setAgentMode('Help phrase heard');
-            current.callForHelp();
-            return;
-          }
-          if (current.state !== 'idle') {
-            setVoice(`heard: ${heard}`);
-            return;
-          }
-          if (!wants_attention) {
-            setAgentMode('Agent asleep · say “Hey Quietcare”');
-            setVoice(`heard: ${heard} · wake word needed`);
-            return;
-          }
-          if (conversingRef.current) return;
-          setAgentMode('Wake word heard · asking agent');
-          setVoice(`wake: ${heard}`);
-          conversingRef.current = true;
-          careApi
-            .elderConversation({ transcript: heard })
-            .then((reply) => {
-              if (!active) return;
-              setAgentMode(reply.action === 'escalated' ? 'Escalating help request' : 'Agent replying');
-              setVoice(`${reply.action === 'escalated' ? 'alert' : 'agent'}: ${reply.reply_text}`);
-              return audioManager.playBase64Audio(reply.audio_b64);
-            })
-            .catch((e) => {
-              if (active) setVoice(`agent err: ${String(e)}`);
-            })
-            .finally(() => {
-              conversingRef.current = false;
-              if (active) setAgentMode('Agent asleep · say “Hey Quietcare”');
-            });
-        })
-        .catch((e) => {
-          if (active) setVoice(`deepgram err: ${String(e)}`);
-        })
-        .finally(() => {
-          transcribingRef.current = false;
-        });
-    });
-    audioManager
-      .requestMicrophoneAccess()
-      .then((granted) => {
-        if (!active) return;
-        if (!granted) {
-          setVoice('mic permission denied');
-          return;
-        }
-        audioManager.startRollingBuffer();
-        setAgentMode('Agent asleep · say “Hey Quietcare”');
-        setVoice('mic on ✓ listening for wake word');
-      })
-      .catch((e) => {
-        if (active) setVoice(`mic err: ${String(e)}`);
-      });
-    return () => {
-      active = false;
-      unsubscribe();
-      void audioManager.stopRollingBuffer();
-    };
-  }, []);
-
-  // Direct TTS test so audio can be verified independent of the fall flow.
   const testVoice = () => {
-    setVoice('speaking…');
     audioManager
       .speakText('Margaret, can you hear me? This is a voice test.')
-      .then(() => setVoice('voice ok ✓'))
-      .catch((e) => setVoice(`voice error: ${String(e)}`));
+      .catch(() => undefined);
   };
 
-  // Real fall detection: only armed while idle so a check-in isn't re-triggered.
   useFallSensor({
     enabled: machine.state === 'idle',
     onFall: () => {
       setLastFall(Date.now());
-      machine.trigger();
+      sendFallTrigger();
     },
     onMagnitude: setMag,
   });
-
-  // Mirror the flow outcome to the backend (so Jack's dashboard sees it).
-  useEffect(() => {
-    const s = machine.state;
-    if (s === 'escalated' && reportedFor.current !== 'escalated') {
-      reportedFor.current = 'escalated';
-      careApi
-        .reportIncident({
-          trigger_source: 'fall',
-          escalated: true,
-          summary: 'Fall detected on device; no clear response — caretaker alerted.',
-          last_transcript: transcriptRef.current || 'No clear response — reaching your caretaker.',
-          audio_clip_b64: audioManager.getRecentAudioB64(),
-        })
-        .catch(() => {});
-    } else if (s === 'resolved' && reportedFor.current !== 'resolved') {
-      reportedFor.current = 'resolved';
-      careApi
-        .reportIncident({
-          trigger_source: 'fall',
-          escalated: false,
-          summary: 'Fall check-in resolved on device — resident confirmed they are okay.',
-          last_transcript: transcriptRef.current || 'I’m fine, just dropped a cup.',
-          audio_clip_b64: audioManager.getRecentAudioB64(),
-        })
-        .catch(() => {});
-    } else if (s === 'idle') {
-      reportedFor.current = '';
-      transcriptRef.current = '';
-    }
-  }, [machine.state]);
 
   const armed = machine.state === 'idle';
 
@@ -174,12 +36,11 @@ export function ElderScreen({ user, onLogout }: { user: DemoUser; onLogout: () =
     <View style={styles.root}>
       <DemoScreen machine={machine} showBrand={false} />
 
-      {/* Top overlay: identity + logout */}
       <View style={styles.topBar} pointerEvents="box-none">
         <View style={styles.sensorPill}>
           <View style={[styles.sensorDot, { backgroundColor: armed ? theme.ok : theme.textSecondary }]} />
           <Text style={styles.sensorText}>
-            {armed ? 'Fall detection on' : 'Checking in'} · |a| {mag.toFixed(2)}g
+            {armed ? 'Fall detection on' : 'Checking in'} · ws {connection} · |a| {mag.toFixed(2)}g
           </Text>
         </View>
         <View style={styles.rightBtns}>
@@ -194,7 +55,7 @@ export function ElderScreen({ user, onLogout }: { user: DemoUser; onLogout: () =
 
       <View style={styles.agentStatus} pointerEvents="none">
         <Text style={styles.agentTitle}>{agentMode}</Text>
-        <Text style={styles.agentSub}>Transcripts display live; LLM only runs after wake/help.</Text>
+        <Text style={styles.agentSub}>WS handles triggers, prompts, audio replies, wake chat, and YAMNet.</Text>
       </View>
 
       <View style={styles.mlStatus} pointerEvents="none">
@@ -208,7 +69,6 @@ export function ElderScreen({ user, onLogout }: { user: DemoUser; onLogout: () =
         </View>
       )}
 
-      {/* Hint so a demo viewer knows how to trigger a real fall */}
       {armed && (
         <View style={styles.hint} pointerEvents="none">
           <Text style={styles.hintText}>
@@ -221,13 +81,6 @@ export function ElderScreen({ user, onLogout }: { user: DemoUser; onLogout: () =
       )}
     </View>
   );
-}
-
-function speechIntent(transcript: string): 'ok' | 'help' | null {
-  const s = transcript.toLowerCase();
-  if (/\b(help|hurt|injured|can't get up|cannot get up|call someone|emergency)\b/.test(s)) return 'help';
-  if (/\b(i'?m ok|i am ok|i'?m okay|i am okay|fine|all good|okay|ok)\b/.test(s)) return 'ok';
-  return null;
 }
 
 function sceneLabel(scene: AudioSceneResult | null): string {

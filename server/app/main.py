@@ -39,9 +39,13 @@ from .escalation_flow import call_caretaker_with_emergency_fallback
 from .observability import init_tracing
 from .wellness import summarize_wellness
 from .protocol import (
+    AudioProbeMessage,
+    AudioProbeResultMessage,
     AudioResponseMessage,
     RegisterMessage,
     TriggerMessage,
+    VoiceConversationMessage,
+    VoiceConversationReplyMessage,
     parse_client_message,
 )
 from .providers.factory import build_providers
@@ -531,7 +535,7 @@ async def ws_endpoint(websocket: WebSocket) -> None:
                 logger.warning("bad client frame: %s", exc)
                 continue
 
-            if isinstance(msg, (RegisterMessage, TriggerMessage)):
+            if isinstance(msg, (RegisterMessage, TriggerMessage, AudioProbeMessage, VoiceConversationMessage)):
                 if not await _authorized(websocket, msg):
                     continue
 
@@ -560,7 +564,13 @@ async def ws_endpoint(websocket: WebSocket) -> None:
             elif isinstance(msg, AudioResponseMessage):
                 session = registry.get(msg.elder_id)
                 if session:
-                    session.on_audio_response(msg.prompt_id, msg.audio_clip_b64)
+                    session.on_audio_response(msg.prompt_id, msg.audio_clip_b64, msg.transcript)
+
+            elif isinstance(msg, AudioProbeMessage):
+                _spawn(_safe_handle_audio_probe(websocket, msg))
+
+            elif isinstance(msg, VoiceConversationMessage):
+                _spawn(_safe_handle_voice_conversation(websocket, msg))
 
             else:  # heartbeat
                 logger.debug("heartbeat from %s", getattr(msg, "elder_id", "?"))
@@ -578,3 +588,40 @@ async def _safe_handle_trigger(session: ElderSession, trigger: TriggerMessage) -
     except Exception as exc:
         capture(exc, where="handle_trigger", elder_id=session.elder_id)
         logger.exception("trigger handling failed: %s", exc)
+
+
+async def _safe_handle_audio_probe(websocket: WebSocket, msg: AudioProbeMessage) -> None:
+    try:
+        providers = await _require_elder(msg.elder_id)
+        transcript_task = asyncio.create_task(providers.voice.transcribe(msg.audio_clip_b64))
+        scene_task = asyncio.create_task(providers.audio_scene.classify(msg.audio_clip_b64))
+        transcript, scene = await asyncio.gather(transcript_task, scene_task)
+        await websocket.send_text(
+            AudioProbeResultMessage(
+                elder_id=msg.elder_id,
+                transcript=transcript,
+                wants_attention=wants_attention(transcript),
+                audio_scene=scene.to_dict(),
+            ).model_dump_json()
+        )
+    except Exception as exc:
+        capture(exc, where="audio_probe", elder_id=msg.elder_id)
+        logger.exception("audio probe failed: %s", exc)
+
+
+async def _safe_handle_voice_conversation(websocket: WebSocket, msg: VoiceConversationMessage) -> None:
+    try:
+        providers = await _require_elder(msg.elder_id)
+        reply = await handle_elder_conversation(
+            providers=providers,
+            elder_id=msg.elder_id,
+            transcript=msg.transcript,
+            auto_emergency_fallback=settings.auto_emergency_fallback,
+            caretaker_ack_timeout_seconds=settings.caretaker_ack_timeout_seconds,
+        )
+        await websocket.send_text(
+            VoiceConversationReplyMessage(elder_id=msg.elder_id, **reply).model_dump_json()
+        )
+    except Exception as exc:
+        capture(exc, where="voice_conversation", elder_id=msg.elder_id)
+        logger.exception("voice conversation failed: %s", exc)

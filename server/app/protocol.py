@@ -59,6 +59,23 @@ class AudioResponseMessage(BaseModel):
     ts: Optional[str] = None
     prompt_id: str
     audio_clip_b64: Optional[str] = None
+    transcript: Optional[str] = None
+
+
+class AudioProbeMessage(BaseModel):
+    type: Literal["audio_probe"]
+    elder_id: str
+    device_token: Optional[str] = None
+    ts: Optional[str] = None
+    audio_clip_b64: str
+
+
+class VoiceConversationMessage(BaseModel):
+    type: Literal["voice_conversation"]
+    elder_id: str
+    device_token: Optional[str] = None
+    ts: Optional[str] = None
+    transcript: str
 
 
 class HeartbeatMessage(BaseModel):
@@ -92,6 +109,24 @@ class AckMessage(BaseModel):
     received: str
 
 
+class AudioProbeResultMessage(BaseModel):
+    type: Literal["audio_probe_result"] = "audio_probe_result"
+    elder_id: str
+    transcript: str
+    wants_attention: bool
+    audio_scene: dict[str, Any]
+
+
+class VoiceConversationReplyMessage(BaseModel):
+    type: Literal["voice_conversation_reply"] = "voice_conversation_reply"
+    elder_id: str
+    action: str
+    transcript: str
+    reply_text: str
+    audio_b64: str
+    escalation: Optional[Any] = None
+
+
 def parse_client_message(raw: dict[str, Any]) -> BaseModel:
     """Parse an inbound client frame into the appropriate model."""
     msg_type = raw.get("type")
@@ -102,6 +137,10 @@ def parse_client_message(raw: dict[str, Any]) -> BaseModel:
             return TriggerMessage(**raw)
         case "audio_response":
             return AudioResponseMessage(**raw)
+        case "audio_probe":
+            return AudioProbeMessage(**raw)
+        case "voice_conversation":
+            return VoiceConversationMessage(**raw)
         case "heartbeat":
             return HeartbeatMessage(**raw)
         case _:

@@ -44,7 +44,22 @@ export interface AudioResponseMessage {
   elder_id: string;
   ts: string;
   prompt_id: string;
+  audio_clip_b64?: string | null;
+  transcript?: string | null;
+}
+
+export interface AudioProbeMessage {
+  type: 'audio_probe';
+  elder_id: string;
+  ts: string;
   audio_clip_b64: string;
+}
+
+export interface VoiceConversationMessage {
+  type: 'voice_conversation';
+  elder_id: string;
+  ts: string;
+  transcript: string;
 }
 
 export interface HeartbeatMessage {
@@ -58,6 +73,8 @@ export type ClientMessage =
   | RegisterMessage
   | TriggerMessage
   | AudioResponseMessage
+  | AudioProbeMessage
+  | VoiceConversationMessage
   | HeartbeatMessage;
 
 // ---- BACKEND -> CLIENT ----
@@ -87,11 +104,35 @@ export interface AckMessage {
   received: string;
 }
 
+export interface AudioProbeResultMessage {
+  type: 'audio_probe_result';
+  elder_id: string;
+  transcript: string;
+  wants_attention: boolean;
+  audio_scene: {
+    tags: Array<{ label: string; score: number }>;
+    distress: boolean;
+    source: string;
+  };
+}
+
+export interface VoiceConversationReplyMessage {
+  type: 'voice_conversation_reply';
+  elder_id: string;
+  action: 'chat' | 'escalated';
+  transcript: string;
+  reply_text: string;
+  audio_b64: string;
+  escalation?: unknown;
+}
+
 export type ServerMessage =
   | SpeakMessage
   | ListenMessage
   | StatusMessage
-  | AckMessage;
+  | AckMessage
+  | AudioProbeResultMessage
+  | VoiceConversationReplyMessage;
 
 // ---- UI-facing app status ----
 

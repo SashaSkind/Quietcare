@@ -71,11 +71,13 @@ export function CaretakerDashboard({
   elderId,
   onBack,
   onLogout,
+  onShowAgentFlow,
 }: {
   user: DemoUser;
   elderId: string;
   onBack: () => void;
   onLogout: () => void;
+  onShowAgentFlow: () => void;
 }) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -158,9 +160,14 @@ export function CaretakerDashboard({
             <Text style={styles.role}>Caretaker · {user.name}</Text>
           </View>
         </View>
-        <Pressable style={styles.logout} onPress={onLogout}>
-          <Text style={styles.logoutText}>Log out</Text>
-        </Pressable>
+        <View style={styles.headerActions}>
+          <Pressable style={styles.agentBtn} onPress={onShowAgentFlow}>
+            <Text style={styles.agentBtnText}>Agents</Text>
+          </Pressable>
+          <Pressable style={styles.logout} onPress={onLogout}>
+            <Text style={styles.logoutText}>Log out</Text>
+          </Pressable>
+        </View>
       </View>
 
       {!data && !error && (
@@ -481,6 +488,16 @@ const styles = StyleSheet.create({
   backText: { color: theme.textPrimary, fontSize: 24, fontWeight: '700', marginTop: -3 },
   brand: { color: theme.textPrimary, fontSize: 22, fontWeight: '900' },
   role: { color: theme.textSecondary, fontSize: 13, marginTop: 1 },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  agentBtn: {
+    borderRadius: 10,
+    backgroundColor: 'rgba(192,132,252,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(192,132,252,0.42)',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  agentBtnText: { color: theme.accent, fontSize: 13, fontWeight: '800' },
   logout: {
     borderRadius: 10,
     borderWidth: 1,

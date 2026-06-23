@@ -66,6 +66,11 @@ export interface AudioSceneResult {
   source: string;
 }
 
+export interface BackendHealth {
+  status: string;
+  providers: Record<string, string>;
+}
+
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     headers: { Accept: 'application/json' },
@@ -107,6 +112,8 @@ async function putJson<T>(path: string, body: unknown): Promise<T> {
 }
 
 export const careApi = {
+  health: () => getJson<BackendHealth>('/health'),
+
   // List every provisioned elder with their profile, so a caretaker can pick
   // which resident to view (people often care for more than one).
   listElders: async (): Promise<ElderSummaryItem[]> => {

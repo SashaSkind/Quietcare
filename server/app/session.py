@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Optional, TypedDict
 
 from .protocol import (
     AckMessage,
@@ -23,6 +23,11 @@ logger = logging.getLogger("quietcare.session")
 LISTEN_TIMEOUT_S = 15.0
 
 
+class AudioResponsePayload(TypedDict):
+    audio_b64: Optional[str]
+    transcript: Optional[str]
+
+
 class ElderSession:
     def __init__(self, websocket: Any, elder_id: str, providers: Providers) -> None:
         self.ws = websocket
@@ -32,7 +37,7 @@ class ElderSession:
 
         self._prompt_n = 0
         self.current_prompt_id: Optional[str] = None
-        self._pending: dict[str, asyncio.Future[Optional[str]]] = {}
+        self._pending: dict[str, asyncio.Future[AudioResponsePayload]] = {}
 
         self.trigger_source = "manual"
         self.device_state: dict[str, Any] = {}
@@ -94,8 +99,10 @@ class ElderSession:
         """Speak a message, then listen and return the transcript (FSM-free)."""
         prompt_id = await self.speak(text)
         await self.send_listen(prompt_id, duration_ms)
-        audio_b64 = await self.await_audio_response(prompt_id)
-        return await self.providers.voice.transcribe(audio_b64)
+        response = await self.await_audio_response(prompt_id)
+        if response.get("transcript"):
+            return response["transcript"] or ""
+        return await self.providers.voice.transcribe(response.get("audio_b64"))
 
     @property
     def is_busy(self) -> bool:
@@ -103,22 +110,27 @@ class ElderSession:
         return self.fsm.state not in (State.IDLE, State.RESOLVED)
 
     # ---- check-in request/response correlation ----
-    async def await_audio_response(self, prompt_id: str) -> Optional[str]:
+    async def await_audio_response(self, prompt_id: str) -> AudioResponsePayload:
         loop = asyncio.get_event_loop()
-        fut: asyncio.Future[Optional[str]] = loop.create_future()
+        fut: asyncio.Future[AudioResponsePayload] = loop.create_future()
         self._pending[prompt_id] = fut
         try:
             return await asyncio.wait_for(fut, timeout=LISTEN_TIMEOUT_S)
         except asyncio.TimeoutError:
             logger.info("listen timeout for %s/%s (no response)", self.elder_id, prompt_id)
-            return None
+            return {"audio_b64": None, "transcript": None}
         finally:
             self._pending.pop(prompt_id, None)
 
-    def on_audio_response(self, prompt_id: str, audio_b64: Optional[str]) -> None:
+    def on_audio_response(
+        self,
+        prompt_id: str,
+        audio_b64: Optional[str],
+        transcript: Optional[str] = None,
+    ) -> None:
         fut = self._pending.get(prompt_id)
         if fut and not fut.done():
-            fut.set_result(audio_b64)
+            fut.set_result({"audio_b64": audio_b64, "transcript": transcript})
 
     # ---- FSM transitions (with status emission) ----
     async def begin_checkin_once(self) -> None:

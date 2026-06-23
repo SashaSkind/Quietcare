@@ -9,11 +9,21 @@ from dataclasses import dataclass
 logger = logging.getLogger("quietcare.telephony")
 
 
+def _escape_xml(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _say_twiml(text: str) -> str:
+    return f"<Response><Say>{_escape_xml(text)}</Say></Response>"
+
+
 @dataclass
 class TelephonyResult:
     ok: bool
     detail: str
     mocked: bool
+    call_sid: str = ""
+    answered: bool | None = None
 
 
 class Telephony(ABC):
@@ -27,10 +37,14 @@ class Telephony(ABC):
     async def call_voice(self, summary: str) -> TelephonyResult:
         ...
 
+    async def call_voice_wait_for_answer(
+        self, summary: str, timeout_s: int
+    ) -> TelephonyResult:
+        return await self.call_voice(summary)
+
     @abstractmethod
     async def dispatch_emergency(self, summary: str) -> TelephonyResult:
-        """Place the gated emergency call. Only invoked after explicit human
-        confirmation (enforced by the state machine + confirmation registry)."""
+        """Place the configured emergency call after confirmation or an enabled fallback policy."""
         ...
 
 
@@ -68,7 +82,7 @@ class TwilioTelephony(Telephony):
     async def call_voice(self, summary: str) -> TelephonyResult:
         import asyncio
 
-        twiml = f"<Response><Say>{summary}</Say></Response>"
+        twiml = _say_twiml(summary)
 
         def _call() -> str:
             call = self._client.calls.create(
@@ -78,7 +92,61 @@ class TwilioTelephony(Telephony):
 
         sid = await asyncio.to_thread(_call)
         logger.info("Twilio call placed (sid=%s)", sid)
-        return TelephonyResult(ok=True, detail=f"call sid={sid}", mocked=False)
+        return TelephonyResult(ok=True, detail=f"call sid={sid}", mocked=False, call_sid=sid)
+
+    async def call_voice_wait_for_answer(
+        self, summary: str, timeout_s: int
+    ) -> TelephonyResult:
+        import asyncio
+        import time
+
+        twiml = _say_twiml(summary)
+        ring_timeout = max(5, min(int(timeout_s), 60))
+
+        def _call() -> str:
+            call = self._client.calls.create(
+                twiml=twiml, from_=self._from, to=self._to, timeout=ring_timeout
+            )
+            return call.sid
+
+        sid = await asyncio.to_thread(_call)
+        logger.info("Twilio caretaker call placed (sid=%s); waiting for answer", sid)
+        deadline = time.monotonic() + max(1, int(timeout_s))
+        unanswered = {"busy", "failed", "no-answer", "canceled"}
+        while time.monotonic() < deadline:
+            status = await asyncio.to_thread(lambda: self._client.calls(sid).fetch().status)
+            if status in ("in-progress", "completed"):
+                logger.info("Twilio caretaker call answered (sid=%s status=%s)", sid, status)
+                return TelephonyResult(
+                    ok=True,
+                    detail=f"caretaker answered sid={sid} status={status}",
+                    mocked=False,
+                    call_sid=sid,
+                    answered=True,
+                )
+            if status in unanswered:
+                logger.warning("Twilio caretaker call not answered (sid=%s status=%s)", sid, status)
+                return TelephonyResult(
+                    ok=False,
+                    detail=f"caretaker not answered sid={sid} status={status}",
+                    mocked=False,
+                    call_sid=sid,
+                    answered=False,
+                )
+            await asyncio.sleep(2)
+
+        try:
+            await asyncio.to_thread(lambda: self._client.calls(sid).update(status="completed"))
+        except Exception:
+            logger.debug("Twilio caretaker call timeout cancel failed", exc_info=True)
+        logger.warning("Twilio caretaker call timed out without answer (sid=%s)", sid)
+        return TelephonyResult(
+            ok=False,
+            detail=f"caretaker not answered before timeout sid={sid}",
+            mocked=False,
+            call_sid=sid,
+            answered=False,
+        )
 
     async def dispatch_emergency(self, summary: str) -> TelephonyResult:
         import asyncio
@@ -90,7 +158,7 @@ class TwilioTelephony(Telephony):
             return TelephonyResult(
                 ok=True, detail="emergency mocked (no number configured)", mocked=True
             )
-        twiml = f"<Response><Say>Emergency dispatch. {summary}</Say></Response>"
+        twiml = _say_twiml(f"Emergency dispatch. {summary}")
 
         def _call() -> str:
             call = self._client.calls.create(
@@ -100,11 +168,14 @@ class TwilioTelephony(Telephony):
 
         sid = await asyncio.to_thread(_call)
         logger.info("Twilio EMERGENCY call placed (sid=%s)", sid)
-        return TelephonyResult(ok=True, detail=f"emergency call sid={sid}", mocked=False)
+        return TelephonyResult(ok=True, detail=f"emergency call sid={sid}", mocked=False, call_sid=sid)
 
 
 class MockTelephony(Telephony):
     name = "mock"
+
+    def __init__(self, caretaker_answers: bool = True) -> None:
+        self.caretaker_answers = caretaker_answers
 
     async def send_sms(self, text: str) -> TelephonyResult:
         logger.warning("WOULD SEND SMS -> caretaker: %s", text)
@@ -114,7 +185,19 @@ class MockTelephony(Telephony):
     async def call_voice(self, summary: str) -> TelephonyResult:
         logger.warning("WOULD CALL caretaker: %s", summary)
         print(f"[TELEPHONY MOCK] WOULD CALL: {summary}")
-        return TelephonyResult(ok=True, detail="mock call", mocked=True)
+        return TelephonyResult(ok=True, detail="mock call", mocked=True, answered=True)
+
+    async def call_voice_wait_for_answer(
+        self, summary: str, timeout_s: int
+    ) -> TelephonyResult:
+        await self.call_voice(summary)
+        if self.caretaker_answers:
+            return TelephonyResult(
+                ok=True, detail="mock caretaker answered", mocked=True, answered=True
+            )
+        return TelephonyResult(
+            ok=False, detail="mock caretaker no answer", mocked=True, answered=False
+        )
 
     async def dispatch_emergency(self, summary: str) -> TelephonyResult:
         logger.warning("WOULD DISPATCH EMERGENCY: %s", summary)

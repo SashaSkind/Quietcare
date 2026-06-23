@@ -1,4 +1,5 @@
-import { Audio } from 'expo-av';
+import { Audio, InterruptionModeIOS } from 'expo-av';
+import * as Speech from 'expo-speech';
 // SDK 54 moved the classic file-system API (cacheDirectory, EncodingType,
 // readAsStringAsync, ...) to the /legacy entry point. Use it here to keep the
 // existing rolling-buffer/audio logic unchanged.
@@ -25,6 +26,7 @@ class AudioManager {
   private paused = false;
   private current: Audio.Recording | null = null;
   private ring: string[] = [];
+  private segmentListeners: Array<(b64: string) => void> = [];
   // Resolvers used to interrupt the segment sleep early (on pause/stop).
   private wakeups: Array<() => void> = [];
   private loopPromise: Promise<void> | null = null;
@@ -34,6 +36,17 @@ class AudioManager {
     const { granted } = await Audio.requestPermissionsAsync();
     this.permissionGranted = granted;
     return granted;
+  }
+
+  async requestMicrophoneAccess(): Promise<boolean> {
+    return this.ensurePermission();
+  }
+
+  onAudioSegment(listener: (b64: string) => void): () => void {
+    this.segmentListeners.push(listener);
+    return () => {
+      this.segmentListeners = this.segmentListeners.filter((l) => l !== listener);
+    };
   }
 
   private wake(): void {
@@ -88,6 +101,10 @@ class AudioManager {
         await Audio.setAudioModeAsync({
           allowsRecordingIOS: true,
           playsInSilentModeIOS: true,
+          staysActiveInBackground: true,
+          interruptionModeIOS: InterruptionModeIOS.DuckOthers,
+          shouldDuckAndroid: true,
+          playThroughEarpieceAndroid: false,
         });
         const rec = new Audio.Recording();
         await rec.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
@@ -124,6 +141,13 @@ class AudioManager {
   private pushSegment(b64: string): void {
     this.ring.push(b64);
     while (this.ring.length > AUDIO_BUFFER.ringSize) this.ring.shift();
+    this.segmentListeners.forEach((listener) => {
+      try {
+        listener(b64);
+      } catch (err) {
+        captureException(err, { stage: 'audio_segment_listener' });
+      }
+    });
   }
 
   /** Most recent buffered segment (the pre-trigger audio), or null if empty. */
@@ -161,6 +185,10 @@ class AudioManager {
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: false,
         playsInSilentModeIOS: true,
+        staysActiveInBackground: true,
+        interruptionModeIOS: InterruptionModeIOS.DuckOthers,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
       });
 
       const uri = `${FileSystem.cacheDirectory}qc-speak-${Date.now()}.wav`;
@@ -192,6 +220,37 @@ class AudioManager {
     }
   }
 
+  async speakText(text: string): Promise<void> {
+    breadcrumb('audio', 'speech:start');
+    await this.pauseBuffer();
+    try {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        playsInSilentModeIOS: true,
+        staysActiveInBackground: true,
+        interruptionModeIOS: InterruptionModeIOS.DuckOthers,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+      });
+      Speech.stop();
+      await new Promise<void>((resolve) => {
+        Speech.speak(text, {
+          rate: 0.95,
+          pitch: 1.0,
+          onDone: resolve,
+          onStopped: resolve,
+          onError: (err) => {
+            captureException(err, { stage: 'speech' });
+            resolve();
+          },
+        });
+      });
+      breadcrumb('audio', 'speech:done');
+    } finally {
+      this.resumeBuffer();
+    }
+  }
+
   /** Record from the mic for `durationMs`, returning the clip as base64. */
   async recordAudioBase64(durationMs: number): Promise<string> {
     breadcrumb('audio', 'listen:record_start', { durationMs });
@@ -203,6 +262,10 @@ class AudioManager {
       await Audio.setAudioModeAsync({
         allowsRecordingIOS: true,
         playsInSilentModeIOS: true,
+        staysActiveInBackground: true,
+        interruptionModeIOS: InterruptionModeIOS.DuckOthers,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
       });
 
       const recording = new Audio.Recording();
@@ -236,3 +299,4 @@ export const playBase64Audio = (b64: string): Promise<void> =>
   audioManager.playBase64Audio(b64);
 export const recordAudioBase64 = (durationMs: number): Promise<string> =>
   audioManager.recordAudioBase64(durationMs);
+export const speakText = (text: string): Promise<void> => audioManager.speakText(text);

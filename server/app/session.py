@@ -223,10 +223,14 @@ class CaretakerService:
         providers: Providers,
         registry: SessionRegistry,
         confirmations: Any = None,
+        auto_emergency_fallback: bool = False,
+        caretaker_ack_timeout_seconds: int = 30,
     ) -> None:
         self.providers = providers
         self.registry = registry
         self.confirmations = confirmations
+        self.auto_emergency_fallback = auto_emergency_fallback
+        self.caretaker_ack_timeout_seconds = caretaker_ack_timeout_seconds
         self.last_result: Optional[str] = None
 
     def attach(self) -> None:
@@ -244,7 +248,12 @@ class CaretakerService:
             return
         logger.info("caretaker-agent handling: %s", json.dumps(msg))
         self.last_result = await run_caretaker_agent(
-            session, self.providers.llm, msg, self.confirmations
+            session,
+            self.providers.llm,
+            msg,
+            self.confirmations,
+            auto_emergency_fallback=self.auto_emergency_fallback,
+            caretaker_ack_timeout_seconds=self.caretaker_ack_timeout_seconds,
         )
         logger.info("caretaker-agent done: %s", self.last_result)
 

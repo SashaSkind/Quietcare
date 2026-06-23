@@ -174,7 +174,7 @@ export function CaretakerDashboard({
         <View style={styles.center}>
           <Text style={styles.errTitle}>Can't reach the backend</Text>
           <Text style={styles.muted}>{error}</Text>
-          <Text style={styles.muted}>Check EXPO_PUBLIC_API_URL ({'LAN IP'}:8000).</Text>
+          <Text style={styles.muted}>Check EXPO_PUBLIC_API_URL ({'LAN IP'}:8080).</Text>
         </View>
       )}
 

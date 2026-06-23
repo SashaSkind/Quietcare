@@ -1,18 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { Audio, InterruptionModeIOS } from 'expo-av';
-import * as Speech from 'expo-speech';
+import { audioManager } from '../audio/audioManager';
 import { DemoScreen } from '../design/DemoScreen';
 import { useDemoMachine } from '../design/useDemoMachine';
 import { theme } from '../design/theme';
 import { useFallSensor } from './useFallSensor';
-import { recordAudioBase64 } from '../audio/audioManager';
 import { careApi } from '../caretaker/api';
 import type { DemoUser } from '../app/session';
-
-// Classify a spoken check-in reply. Help wins over OK for safety.
-const HELP_RE = /\b(help|can'?t|cannot|hurt|emergency|fell|fall|stuck)\b/i;
-const OK_RE = /\b(ok|okay|fine|good|yes|yeah|yep|alright|all right|great)\b/i;
 
 // Elder experience: the Halo companion screen driven by a real, on-device
 // accelerometer fall detector. A detected fall (impact + stillness) triggers
@@ -24,32 +18,91 @@ export function ElderScreen({ user, onLogout }: { user: DemoUser; onLogout: () =
   const [lastFall, setLastFall] = useState<number | null>(null);
   const [voice, setVoice] = useState('');
   const reportedFor = useRef<string>('');
-  // Latest state, readable inside the async listen flow without stale closures.
-  const stateRef = useRef(machine.state);
-  stateRef.current = machine.state;
+  const machineRef = useRef(machine);
+  const transcribingRef = useRef(false);
+  const conversingRef = useRef(false);
+  const transcriptRef = useRef('');
+
+  useEffect(() => {
+    machineRef.current = machine;
+  });
 
   // Allow the spoken check-in to be heard even with the iOS mute switch on.
   // Set a full playback session so AVSpeechSynthesizer routes to the speaker.
   useEffect(() => {
-    Audio.setAudioModeAsync({
-      playsInSilentModeIOS: true,
-      allowsRecordingIOS: false,
-      interruptionModeIOS: InterruptionModeIOS.DuckOthers,
-      shouldDuckAndroid: true,
-      playThroughEarpieceAndroid: false,
-    }).catch((e) => setVoice(`audio mode err: ${String(e)}`));
+    let active = true;
+    const unsubscribe = audioManager.onAudioSegment((audio_clip_b64) => {
+      if (transcribingRef.current) return;
+      transcribingRef.current = true;
+      careApi
+        .transcribeAudio({ audio_clip_b64 })
+        .then(({ transcript, wants_attention }) => {
+          if (!active) return;
+          const heard = transcript.trim();
+          if (!heard) return;
+          transcriptRef.current = heard;
+          setVoice(`heard: ${heard}`);
+          const intent = speechIntent(heard);
+          const current = machineRef.current;
+          if (current.state === 'checking_in' && intent === 'ok') {
+            current.confirmOk();
+            return;
+          }
+          if (current.state === 'checking_in' && intent === 'help') {
+            current.callForHelp();
+            return;
+          }
+          if (current.state !== 'idle' || !wants_attention || conversingRef.current) return;
+          conversingRef.current = true;
+          careApi
+            .elderConversation({ transcript: heard })
+            .then((reply) => {
+              if (!active) return;
+              setVoice(`${reply.action === 'escalated' ? 'alert' : 'agent'}: ${reply.reply_text}`);
+              return audioManager.playBase64Audio(reply.audio_b64);
+            })
+            .catch((e) => {
+              if (active) setVoice(`agent err: ${String(e)}`);
+            })
+            .finally(() => {
+              conversingRef.current = false;
+            });
+        })
+        .catch((e) => {
+          if (active) setVoice(`deepgram err: ${String(e)}`);
+        })
+        .finally(() => {
+          transcribingRef.current = false;
+        });
+    });
+    audioManager
+      .requestMicrophoneAccess()
+      .then((granted) => {
+        if (!active) return;
+        if (!granted) {
+          setVoice('mic permission denied');
+          return;
+        }
+        audioManager.startRollingBuffer();
+        setVoice('mic on ✓ Deepgram listening');
+      })
+      .catch((e) => {
+        if (active) setVoice(`mic err: ${String(e)}`);
+      });
+    return () => {
+      active = false;
+      unsubscribe();
+      void audioManager.stopRollingBuffer();
+    };
   }, []);
 
   // Direct TTS test so audio can be verified independent of the fall flow.
   const testVoice = () => {
     setVoice('speaking…');
-    Speech.stop();
-    Speech.speak('Margaret, can you hear me? This is a voice test.', {
-      rate: 0.95,
-      onDone: () => setVoice('voice ok ✓'),
-      onStopped: () => setVoice('stopped'),
-      onError: (e) => setVoice(`voice error: ${String(e)}`),
-    });
+    audioManager
+      .speakText('Margaret, can you hear me? This is a voice test.')
+      .then(() => setVoice('voice ok ✓'))
+      .catch((e) => setVoice(`voice error: ${String(e)}`));
   };
 
   // Real fall detection: only armed while idle so a check-in isn't re-triggered.
@@ -72,7 +125,8 @@ export function ElderScreen({ user, onLogout }: { user: DemoUser; onLogout: () =
           trigger_source: 'fall',
           escalated: true,
           summary: 'Fall detected on device; no clear response — caretaker alerted.',
-          last_transcript: 'No clear response — reaching your caretaker.',
+          last_transcript: transcriptRef.current || 'No clear response — reaching your caretaker.',
+          audio_clip_b64: audioManager.getRecentAudioB64(),
         })
         .catch(() => {});
     } else if (s === 'resolved' && reportedFor.current !== 'resolved') {
@@ -82,71 +136,14 @@ export function ElderScreen({ user, onLogout }: { user: DemoUser; onLogout: () =
           trigger_source: 'fall',
           escalated: false,
           summary: 'Fall check-in resolved on device — resident confirmed they are okay.',
-          last_transcript: 'I’m fine, just dropped a cup.',
+          last_transcript: transcriptRef.current || 'I’m fine, just dropped a cup.',
+          audio_clip_b64: audioManager.getRecentAudioB64(),
         })
         .catch(() => {});
     } else if (s === 'idle') {
       reportedFor.current = '';
+      transcriptRef.current = '';
     }
-  }, [machine.state]);
-
-  // Hybrid check-in: while the prompt is up, also LISTEN. Record after the
-  // spoken question finishes (so we don't transcribe our own TTS), transcribe
-  // via the backend (Deepgram), and resolve/escalate on the reply. The tap
-  // buttons stay active — whichever resolves first wins.
-  useEffect(() => {
-    if (machine.state !== 'checking_in') return;
-    let cancelled = false;
-    const stillChecking = () => !cancelled && stateRef.current === 'checking_in';
-
-    (async () => {
-      setVoice('listening…');
-      // Wait for the spoken prompt to finish (poll up to ~3s).
-      for (let i = 0; i < 12; i++) {
-        let speaking = false;
-        try {
-          speaking = await Speech.isSpeakingAsync();
-        } catch {
-          // ignore
-        }
-        if (!speaking || cancelled) break;
-        await new Promise((r) => setTimeout(r, 250));
-      }
-      if (!stillChecking()) return;
-
-      let clip = '';
-      try {
-        clip = await recordAudioBase64(5000);
-      } catch {
-        if (!cancelled) setVoice('mic unavailable — tap to respond');
-        return;
-      }
-      // Recording switched the session to record mode; restore playback so the
-      // resolved/escalation prompts are audible.
-      Audio.setAudioModeAsync({
-        playsInSilentModeIOS: true,
-        allowsRecordingIOS: false,
-        interruptionModeIOS: InterruptionModeIOS.DuckOthers,
-      }).catch(() => {});
-      if (!stillChecking()) return;
-
-      let transcript = '';
-      try {
-        transcript = (await careApi.transcribe(clip)).transcript || '';
-      } catch {
-        // ignore — fall back to tap / countdown
-      }
-      if (!stillChecking()) return;
-      setVoice(transcript ? `heard: “${transcript}”` : 'no reply heard');
-      if (HELP_RE.test(transcript)) machine.callForHelp();
-      else if (OK_RE.test(transcript)) machine.confirmOk();
-      // else: let the countdown escalate naturally.
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [machine.state]);
 
   const armed = machine.state === 'idle';
@@ -192,6 +189,13 @@ export function ElderScreen({ user, onLogout }: { user: DemoUser; onLogout: () =
       )}
     </View>
   );
+}
+
+function speechIntent(transcript: string): 'ok' | 'help' | null {
+  const s = transcript.toLowerCase();
+  if (/\b(help|hurt|injured|can't get up|cannot get up|call someone|emergency)\b/.test(s)) return 'help';
+  if (/\b(i'?m ok|i am ok|i'?m okay|i am okay|fine|all good|okay|ok)\b/.test(s)) return 'ok';
+  return null;
 }
 
 function timeSince(ts: number): string {

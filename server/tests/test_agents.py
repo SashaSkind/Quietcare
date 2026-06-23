@@ -39,10 +39,11 @@ def _b64(s: str) -> str:
 
 
 class RecordingTelephony(MockTelephony):
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, caretaker_answers: bool = True) -> None:
+        super().__init__(caretaker_answers=caretaker_answers)
         self.sms: list[str] = []
         self.calls: list[str] = []
+        self.emergencies: list[str] = []
 
     async def send_sms(self, text: str) -> TelephonyResult:
         self.sms.append(text)
@@ -51,6 +52,10 @@ class RecordingTelephony(MockTelephony):
     async def call_voice(self, summary: str) -> TelephonyResult:
         self.calls.append(summary)
         return await super().call_voice(summary)
+
+    async def dispatch_emergency(self, summary: str) -> TelephonyResult:
+        self.emergencies.append(summary)
+        return await super().dispatch_emergency(summary)
 
 
 class AutoRespondWS:
@@ -77,8 +82,12 @@ class AutoRespondWS:
             await asyncio.sleep(0.005)
 
 
-def _build(transcript: str):
-    telephony = RecordingTelephony()
+def _build(
+    transcript: str,
+    auto_emergency_fallback: bool = False,
+    caretaker_answers: bool = True,
+):
+    telephony = RecordingTelephony(caretaker_answers=caretaker_answers)
     providers = Providers(
         llm=MockLLM(),
         voice=MockVoice(),
@@ -87,7 +96,12 @@ def _build(transcript: str):
         bus=InProcessBus(),
     )
     registry = SessionRegistry()
-    caretaker = CaretakerService(providers, registry)
+    caretaker = CaretakerService(
+        providers,
+        registry,
+        auto_emergency_fallback=auto_emergency_fallback,
+        caretaker_ack_timeout_seconds=1,
+    )
     caretaker.attach()
     ws = AutoRespondWS(transcript)
     session = ElderSession(ws, "margaret-01", providers)
@@ -121,6 +135,23 @@ class TestElderFlow(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session.fsm.state, State.CARETAKER_NOTIFIED)
         self.assertEqual(len(telephony.sms), 1)
         self.assertEqual(len(telephony.calls), 1)
+        self.assertEqual(len(telephony.emergencies), 0)
+        self.assertIsNotNone(caretaker.last_result)
+
+    async def test_caretaker_no_answer_auto_dispatches_emergency(self):
+        session, ws, telephony, caretaker = _build(
+            "[silence]",
+            auto_emergency_fallback=True,
+            caretaker_answers=False,
+        )
+        trigger = TriggerMessage(
+            type="trigger", elder_id="margaret-01", trigger_source="fall"
+        )
+        await handle_trigger(session, trigger)
+        self.assertEqual(session.fsm.state, State.CARETAKER_NOTIFIED)
+        self.assertEqual(len(telephony.sms), 1)
+        self.assertEqual(len(telephony.calls), 1)
+        self.assertEqual(len(telephony.emergencies), 1)
         self.assertIsNotNone(caretaker.last_result)
 
 

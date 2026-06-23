@@ -34,6 +34,8 @@ from .medications import (
     adherence_summary,
     run_medication_reminder,
 )
+from .elder_conversation import handle_elder_conversation, wants_attention
+from .escalation_flow import call_caretaker_with_emergency_fallback
 from .observability import init_tracing
 from .wellness import summarize_wellness
 from .protocol import (
@@ -78,7 +80,13 @@ async def lifespan(app: FastAPI):
 
     registry = SessionRegistry()
     confirmations = ConfirmationRegistry()
-    caretaker = CaretakerService(providers, registry, confirmations)
+    caretaker = CaretakerService(
+        providers,
+        registry,
+        confirmations,
+        auto_emergency_fallback=settings.auto_emergency_fallback,
+        caretaker_ack_timeout_seconds=settings.caretaker_ack_timeout_seconds,
+    )
     caretaker.attach()
 
     medications = MedicationService(providers, registry, settings)
@@ -422,6 +430,36 @@ class DemoIncidentRequest(BaseModel):
     escalated: bool = True
     summary: Optional[str] = None
     last_transcript: Optional[str] = None
+    audio_clip_b64: Optional[str] = None
+
+
+class AudioTranscriptRequest(BaseModel):
+    audio_clip_b64: str
+
+
+class ElderConversationRequest(BaseModel):
+    transcript: str
+
+
+@app.post("/elders/{elder_id}/demo/transcribe")
+async def demo_transcribe(elder_id: str, body: AudioTranscriptRequest) -> dict[str, str | bool]:
+    providers = await _require_elder(elder_id)
+    transcript = await providers.voice.transcribe(body.audio_clip_b64)
+    return {"transcript": transcript, "wants_attention": wants_attention(transcript)}
+
+
+@app.post("/elders/{elder_id}/voice/conversation")
+async def elder_voice_conversation(
+    elder_id: str, body: ElderConversationRequest
+) -> dict[str, object]:
+    providers = await _require_elder(elder_id)
+    return await handle_elder_conversation(
+        providers=providers,
+        elder_id=elder_id,
+        transcript=body.transcript,
+        auto_emergency_fallback=settings.auto_emergency_fallback,
+        caretaker_ack_timeout_seconds=settings.caretaker_ack_timeout_seconds,
+    )
 
 
 @app.post("/elders/{elder_id}/demo/incident")
@@ -433,13 +471,16 @@ async def demo_incident(elder_id: str, body: DemoIncidentRequest) -> dict[str, o
     from datetime import datetime, timezone
 
     providers = await _require_elder(elder_id)
+    transcript = body.last_transcript or ""
+    if not transcript and body.audio_clip_b64:
+        transcript = await providers.voice.transcribe(body.audio_clip_b64)
     event = {
         "kind": "incident",
         "ts": datetime.now(timezone.utc).isoformat(),
         "trigger_source": body.trigger_source,
         "final_state": "escalated" if body.escalated else "resolved",
         "escalated": body.escalated,
-        "last_transcript": body.last_transcript or "",
+        "last_transcript": transcript,
         "summary": body.summary
         or (
             "Fall detected on device; caretaker alerted."
@@ -448,7 +489,22 @@ async def demo_incident(elder_id: str, body: DemoIncidentRequest) -> dict[str, o
         ),
     }
     await providers.memory.log_event(elder_id, event)
-    return {"elder_id": elder_id, "event": event}
+    escalation = None
+    if body.escalated:
+        await providers.telephony.send_sms(
+            f"Quietcare alert for {elder_id}: {event['summary']}"
+        )
+        escalation = await call_caretaker_with_emergency_fallback(
+            providers=providers,
+            elder_id=elder_id,
+            summary=str(event["summary"]),
+            severity="high",
+            trigger_source=body.trigger_source,
+            hard_fall=body.trigger_source == "fall",
+            auto_emergency_fallback=settings.auto_emergency_fallback,
+            caretaker_ack_timeout_seconds=settings.caretaker_ack_timeout_seconds,
+        )
+    return {"elder_id": elder_id, "event": event, "escalation": escalation}
 
 
 @app.websocket("/ws")

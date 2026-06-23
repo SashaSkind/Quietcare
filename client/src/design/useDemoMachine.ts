@@ -1,38 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as Speech from 'expo-speech';
-import { Audio, InterruptionModeIOS } from 'expo-av';
+import { speakText } from '../audio/audioManager';
 import type { DemoState } from './types';
 import { COUNTDOWN_SECONDS } from './theme';
 
-// Configure a playback audio session so spoken prompts are audible even with
-// the iOS Ring/Silent switch set to silent. Cached so we only set it once, but
-// re-applied lazily before the first prompt regardless of which screen mounted.
-let audioReady: Promise<void> | null = null;
-function ensureAudioSession(): Promise<void> {
-  if (!audioReady) {
-    audioReady = Audio.setAudioModeAsync({
-      playsInSilentModeIOS: true,
-      allowsRecordingIOS: false,
-      interruptionModeIOS: InterruptionModeIOS.DuckOthers,
-      shouldDuckAndroid: true,
-      playThroughEarpieceAndroid: false,
-    }).catch(() => {});
-  }
-  return audioReady;
-}
-
-// Speak a line with a calm, slightly slow voice. Ensures the playback session
-// is active first (so it overrides the mute switch), stops any in-progress
-// speech so prompts never overlap, and fails soft where TTS is unavailable.
+// Speak a line with a calm, slightly slow voice. Stops any in-progress speech
+// first so prompts never overlap. Fails soft where TTS is unavailable.
 function say(text: string): void {
-  ensureAudioSession().finally(() => {
-    try {
-      Speech.stop();
-      Speech.speak(text, { rate: 0.95, pitch: 1.0 });
-    } catch {
-      // no-op: TTS not available on this platform
-    }
-  });
+  try {
+    void speakText(text).catch(() => undefined);
+  } catch {
+    // no-op: TTS not available on this platform
+  }
 }
 
 export interface DemoMachine {

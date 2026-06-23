@@ -65,6 +65,7 @@ cp .env.example .env   # adjust EXPO_PUBLIC_WS_URL if needed
 | Variable | Purpose |
 | --- | --- |
 | `EXPO_PUBLIC_WS_URL` | Backend WebSocket URL incl. `/ws`. For the mock on a device, use your LAN IP (e.g. `ws://192.168.1.50:8080/ws`). |
+| `EXPO_PUBLIC_API_URL` | Backend REST base URL for the caretaker dashboard and demo incident reporting. For a physical device, use your LAN IP (e.g. `http://192.168.1.50:8080`). |
 | `EXPO_PUBLIC_SENTRY_DSN` | Sentry **client** DSN (a DSN is not a secret). |
 | `EXPO_PUBLIC_ELDER_ID` | Elder identifier this device represents. |
 

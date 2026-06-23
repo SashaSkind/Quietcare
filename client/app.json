@@ -18,6 +18,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.quietcare.client",
       "infoPlist": {
+        "UIBackgroundModes": ["audio"],
         "NSMicrophoneUsageDescription": "Quietcare records short audio clips during a check-in so a caretaker can confirm you are okay.",
         "NSMotionUsageDescription": "Quietcare reads motion sensors to detect possible falls.",
         "NSCameraUsageDescription": "Quietcare captures a still photo when an emergency is detected so a caretaker can see the situation.",

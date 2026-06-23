@@ -6,9 +6,9 @@ export const WS_URL: string =
 
 // REST base URL of the Quietcare backend (caretaker dashboard + demo incident
 // reporting). On a physical device this must be the machine's LAN IP, e.g.
-// http://10.0.0.218:8000 — localhost only works in a simulator/emulator.
+// http://10.0.0.218:8080 — localhost only works in a simulator/emulator.
 export const API_URL: string =
-  process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000';
+  process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8080';
 
 export const SENTRY_DSN: string = process.env.EXPO_PUBLIC_SENTRY_DSN ?? '';
 

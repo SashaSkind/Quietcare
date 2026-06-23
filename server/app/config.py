@@ -70,6 +70,8 @@ class Settings(BaseSettings):
     # line in a demo; use a safe test number you control. When unset, emergency
     # dispatch is logged only (mocked), even with real Twilio.
     emergency_number: str = ""
+    auto_emergency_fallback: bool = False
+    caretaker_ack_timeout_seconds: int = 30
 
     # Browser automation (Browserbase) for the everyday-care computer-use path
     # (e.g. medication refill on a pharmacy portal). When unset, a mock browser

@@ -162,9 +162,27 @@ export const careApi = {
 
   // Elder-side: report an on-device fall so it surfaces on the dashboard.
   reportIncident: (
-    body: { trigger_source?: string; escalated?: boolean; summary?: string; last_transcript?: string },
+    body: {
+      trigger_source?: string;
+      escalated?: boolean;
+      summary?: string;
+      last_transcript?: string;
+      audio_clip_b64?: string | null;
+    },
     id = ELDER_ID,
-  ) => postJson<{ event: IncidentEvent }>(`/elders/${id}/demo/incident`, body),
+  ) => postJson<{ event: IncidentEvent; escalation?: unknown }>(`/elders/${id}/demo/incident`, body),
+
+  transcribeAudio: (body: { audio_clip_b64: string }, id = ELDER_ID) =>
+    postJson<{ transcript: string; wants_attention: boolean }>(`/elders/${id}/demo/transcribe`, body),
+
+  elderConversation: (body: { transcript: string }, id = ELDER_ID) =>
+    postJson<{
+      action: 'chat' | 'escalated';
+      transcript: string;
+      reply_text: string;
+      audio_b64: string;
+      escalation?: unknown;
+    }>(`/elders/${id}/voice/conversation`, body),
 };
 
 export function isIncident(e: EventRecord): e is IncidentEvent {

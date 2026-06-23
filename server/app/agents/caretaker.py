@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any, Optional
 
+from ..escalation_flow import call_caretaker_with_emergency_fallback
 from ..providers.llm import LLM
 from .base import run_agent
 
@@ -109,6 +110,8 @@ async def run_caretaker_agent(
     llm: LLM,
     msg: dict[str, Any],
     confirmations: "Optional[ConfirmationRegistry]" = None,
+    auto_emergency_fallback: bool = False,
+    caretaker_ack_timeout_seconds: int = 30,
 ) -> str:
     p = session.providers
     elder_id = session.elder_id
@@ -125,8 +128,17 @@ async def run_caretaker_agent(
 
         if name == "call_caretaker_voice":
             session.caretaker_notified_once()
-            res = await p.telephony.call_voice(args["summary"])
-            return f"call: ok={res.ok} mocked={res.mocked} ({res.detail})"
+            res = await call_caretaker_with_emergency_fallback(
+                providers=p,
+                elder_id=elder_id,
+                summary=args["summary"],
+                severity=str(msg.get("severity", "high")),
+                trigger_source=session.trigger_source,
+                hard_fall=session.hard_fall,
+                auto_emergency_fallback=auto_emergency_fallback,
+                caretaker_ack_timeout_seconds=caretaker_ack_timeout_seconds,
+            )
+            return f"call/fallback: {json.dumps(res)}"
 
         if name == "book_task":
             return f"task booked (stub): {json.dumps(args.get('task', {}))}"

@@ -7,7 +7,10 @@ plays and records audio.
 from __future__ import annotations
 
 import base64
+import logging
 from abc import ABC, abstractmethod
+
+logger = logging.getLogger("quietcare.voice")
 
 # A tiny valid silent WAV (44-byte header, no samples) used by the mock TTS.
 _SILENT_WAV = base64.b64encode(
@@ -18,6 +21,18 @@ _SILENT_WAV = base64.b64encode(
     + (2).to_bytes(2, "little") + (16).to_bytes(2, "little")
     + b"data" + (0).to_bytes(4, "little")
 ).decode("ascii")
+
+
+def _guess_mimetype(audio: bytes) -> str:
+    if audio.startswith(b"RIFF") and audio[8:12] == b"WAVE":
+        return "audio/wav"
+    if len(audio) > 12 and audio[4:8] == b"ftyp":
+        return "audio/mp4"
+    if audio.startswith(b"OggS"):
+        return "audio/ogg"
+    if audio.startswith(b"ID3") or audio[:2] == b"\xff\xfb":
+        return "audio/mpeg"
+    return "application/octet-stream"
 
 
 class Voice(ABC):
@@ -46,14 +61,15 @@ class DeepgramVoice(Voice):
         from deepgram import PrerecordedOptions
 
         audio = base64.b64decode(audio_b64)
-        source = {"buffer": audio, "mimetype": "audio/wav"}
+        source = {"buffer": audio, "mimetype": _guess_mimetype(audio)}
         options = PrerecordedOptions(model="nova-2", smart_format=True)
-        resp = await self._client.listen.asyncrest.v("1").transcribe_file(
-            source, options
-        )
         try:
+            resp = await self._client.listen.asyncrest.v("1").transcribe_file(
+                source, options
+            )
             return resp.results.channels[0].alternatives[0].transcript or ""
         except Exception:
+            logger.warning("Deepgram transcription failed", exc_info=True)
             return ""
 
     async def synthesize(self, text: str) -> str:

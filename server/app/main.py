@@ -442,10 +442,16 @@ class ElderConversationRequest(BaseModel):
 
 
 @app.post("/elders/{elder_id}/demo/transcribe")
-async def demo_transcribe(elder_id: str, body: AudioTranscriptRequest) -> dict[str, str | bool]:
+async def demo_transcribe(elder_id: str, body: AudioTranscriptRequest) -> dict[str, object]:
     providers = await _require_elder(elder_id)
-    transcript = await providers.voice.transcribe(body.audio_clip_b64)
-    return {"transcript": transcript, "wants_attention": wants_attention(transcript)}
+    transcript_task = asyncio.create_task(providers.voice.transcribe(body.audio_clip_b64))
+    scene_task = asyncio.create_task(providers.audio_scene.classify(body.audio_clip_b64))
+    transcript, scene = await asyncio.gather(transcript_task, scene_task)
+    return {
+        "transcript": transcript,
+        "wants_attention": wants_attention(transcript),
+        "audio_scene": scene.to_dict(),
+    }
 
 
 @app.post("/elders/{elder_id}/voice/conversation")

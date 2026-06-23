@@ -3,6 +3,7 @@
 Run with:  python -m unittest discover -s tests
 """
 
+import base64
 import os
 import sys
 import unittest
@@ -114,6 +115,19 @@ class TestElderEndpoints(unittest.TestCase):
 
     def test_get_unknown_404(self):
         self.assertEqual(self.client.get("/elders/nope").status_code, 404)
+
+    def test_demo_transcribe_includes_audio_scene(self):
+        payload = base64.b64encode(b"QC-SCENARIO-TRANSCRIPT:Hey Quietcare hello").decode("ascii")
+        resp = self.client.post(
+            "/elders/margaret-01/demo/transcribe",
+            json={"audio_clip_b64": payload},
+        )
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertEqual(body["transcript"], "Hey Quietcare hello")
+        self.assertTrue(body["wants_attention"])
+        self.assertEqual(body["audio_scene"]["source"], "mock")
+        self.assertIn("tags", body["audio_scene"])
 
     def test_admin_token_guard(self):
         settings.admin_token = "secret"

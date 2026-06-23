@@ -33,7 +33,7 @@ function caption(state: DemoState): { title: string; sub: string } {
   }
 }
 
-export function DemoScreen({ machine }: { machine?: DemoMachine } = {}) {
+export function DemoScreen({ machine, showBrand = true }: { machine?: DemoMachine; showBrand?: boolean } = {}) {
   // Allow an external machine (e.g. ElderScreen wiring real fall detection) to
   // be injected; otherwise the screen is self-contained for design previews.
   const internal = useDemoMachine();
@@ -45,9 +45,11 @@ export function DemoScreen({ machine }: { machine?: DemoMachine } = {}) {
   return (
     <View style={[styles.root, { backgroundColor: urgent ? theme.bgUrgent : theme.bg }]}>
       {/* Brand */}
-      <View style={styles.brand}>
-        <Text style={styles.brandName}>Quietcare</Text>
-      </View>
+      {showBrand && (
+        <View style={styles.brand}>
+          <Text style={styles.brandName}>Quietcare</Text>
+        </View>
+      )}
 
       {/* Orb + status */}
       <View style={styles.center}>

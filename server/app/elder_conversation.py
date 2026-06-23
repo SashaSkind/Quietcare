@@ -7,7 +7,7 @@ from typing import Any
 from .escalation_flow import call_caretaker_with_emergency_fallback
 from .providers.factory import Providers
 
-WAKE_RE = re.compile(r"\b(quiet\s*care|quietcare|hey\s+quiet\s*care|hey\s+quietcare)\b", re.I)
+WAKE_RE = re.compile(r"\b((?:hey|hi|hello|ok)\s+)?quiet\s*care|\b((?:hey|hi|hello|ok)\s+)?quietcare\b", re.I)
 HELP_RE = re.compile(
     r"\b(help|emergency|hurt|injured|fallen|fell|can't get up|cannot get up|cant get up|call jack|call caretaker|call someone|call 911)\b",
     re.I,

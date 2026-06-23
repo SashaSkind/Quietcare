@@ -60,6 +60,12 @@ export interface MedicationItem {
   dose?: string | null;
 }
 
+export interface AudioSceneResult {
+  tags: Array<{ label: string; score: number }>;
+  distress: boolean;
+  source: string;
+}
+
 async function getJson<T>(path: string): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     headers: { Accept: 'application/json' },
@@ -173,7 +179,11 @@ export const careApi = {
   ) => postJson<{ event: IncidentEvent; escalation?: unknown }>(`/elders/${id}/demo/incident`, body),
 
   transcribeAudio: (body: { audio_clip_b64: string }, id = ELDER_ID) =>
-    postJson<{ transcript: string; wants_attention: boolean }>(`/elders/${id}/demo/transcribe`, body),
+    postJson<{
+      transcript: string;
+      wants_attention: boolean;
+      audio_scene: AudioSceneResult;
+    }>(`/elders/${id}/demo/transcribe`, body),
 
   elderConversation: (body: { transcript: string }, id = ELDER_ID) =>
     postJson<{

@@ -5,7 +5,7 @@ import { DemoScreen } from '../design/DemoScreen';
 import { useDemoMachine } from '../design/useDemoMachine';
 import { theme } from '../design/theme';
 import { useFallSensor } from './useFallSensor';
-import { careApi } from '../caretaker/api';
+import { careApi, type AudioSceneResult } from '../caretaker/api';
 import type { DemoUser } from '../app/session';
 
 // Elder experience: the Halo companion screen driven by a real, on-device
@@ -17,6 +17,8 @@ export function ElderScreen({ user, onLogout }: { user: DemoUser; onLogout: () =
   const [mag, setMag] = useState(1);
   const [lastFall, setLastFall] = useState<number | null>(null);
   const [voice, setVoice] = useState('');
+  const [agentMode, setAgentMode] = useState('Agent asleep · say “Hey Quietcare”');
+  const [scene, setScene] = useState<AudioSceneResult | null>(null);
   const reportedFor = useRef<string>('');
   const machineRef = useRef(machine);
   const transcribingRef = useRef(false);
@@ -36,28 +38,46 @@ export function ElderScreen({ user, onLogout }: { user: DemoUser; onLogout: () =
       transcribingRef.current = true;
       careApi
         .transcribeAudio({ audio_clip_b64 })
-        .then(({ transcript, wants_attention }) => {
+        .then(({ transcript, wants_attention, audio_scene }) => {
           if (!active) return;
+          setScene(audio_scene);
           const heard = transcript.trim();
-          if (!heard) return;
+          const sceneText = formatAudioScene(audio_scene);
+          if (!heard) {
+            if (sceneText) setVoice(`YAMNet: ${sceneText}`);
+            return;
+          }
           transcriptRef.current = heard;
-          setVoice(`heard: ${heard}`);
           const intent = speechIntent(heard);
           const current = machineRef.current;
           if (current.state === 'checking_in' && intent === 'ok') {
+            setAgentMode('Check-in resolved by voice');
             current.confirmOk();
             return;
           }
           if (current.state === 'checking_in' && intent === 'help') {
+            setAgentMode('Help phrase heard');
             current.callForHelp();
             return;
           }
-          if (current.state !== 'idle' || !wants_attention || conversingRef.current) return;
+          if (current.state !== 'idle') {
+            setVoice(`heard: ${heard}`);
+            return;
+          }
+          if (!wants_attention) {
+            setAgentMode('Agent asleep · say “Hey Quietcare”');
+            setVoice(`heard: ${heard} · wake word needed`);
+            return;
+          }
+          if (conversingRef.current) return;
+          setAgentMode('Wake word heard · asking agent');
+          setVoice(`wake: ${heard}`);
           conversingRef.current = true;
           careApi
             .elderConversation({ transcript: heard })
             .then((reply) => {
               if (!active) return;
+              setAgentMode(reply.action === 'escalated' ? 'Escalating help request' : 'Agent replying');
               setVoice(`${reply.action === 'escalated' ? 'alert' : 'agent'}: ${reply.reply_text}`);
               return audioManager.playBase64Audio(reply.audio_b64);
             })
@@ -66,6 +86,7 @@ export function ElderScreen({ user, onLogout }: { user: DemoUser; onLogout: () =
             })
             .finally(() => {
               conversingRef.current = false;
+              if (active) setAgentMode('Agent asleep · say “Hey Quietcare”');
             });
         })
         .catch((e) => {
@@ -84,7 +105,8 @@ export function ElderScreen({ user, onLogout }: { user: DemoUser; onLogout: () =
           return;
         }
         audioManager.startRollingBuffer();
-        setVoice('mic on ✓ Deepgram listening');
+        setAgentMode('Agent asleep · say “Hey Quietcare”');
+        setVoice('mic on ✓ listening for wake word');
       })
       .catch((e) => {
         if (active) setVoice(`mic err: ${String(e)}`);
@@ -150,7 +172,7 @@ export function ElderScreen({ user, onLogout }: { user: DemoUser; onLogout: () =
 
   return (
     <View style={styles.root}>
-      <DemoScreen machine={machine} />
+      <DemoScreen machine={machine} showBrand={false} />
 
       {/* Top overlay: identity + logout */}
       <View style={styles.topBar} pointerEvents="box-none">
@@ -168,6 +190,16 @@ export function ElderScreen({ user, onLogout }: { user: DemoUser; onLogout: () =
             <Text style={styles.logoutText}>Log out</Text>
           </Pressable>
         </View>
+      </View>
+
+      <View style={styles.agentStatus} pointerEvents="none">
+        <Text style={styles.agentTitle}>{agentMode}</Text>
+        <Text style={styles.agentSub}>Transcripts display live; LLM only runs after wake/help.</Text>
+      </View>
+
+      <View style={styles.mlStatus} pointerEvents="none">
+        <Text style={styles.mlTitle}>{sceneLabel(scene)}</Text>
+        <Text style={styles.mlSub}>{formatAudioScene(scene) || 'waiting for audio tags'}</Text>
       </View>
 
       {!!voice && (
@@ -196,6 +228,20 @@ function speechIntent(transcript: string): 'ok' | 'help' | null {
   if (/\b(help|hurt|injured|can't get up|cannot get up|call someone|emergency)\b/.test(s)) return 'help';
   if (/\b(i'?m ok|i am ok|i'?m okay|i am okay|fine|all good|okay|ok)\b/.test(s)) return 'ok';
   return null;
+}
+
+function sceneLabel(scene: AudioSceneResult | null): string {
+  if (!scene) return 'YAMNet ML waiting';
+  const model = scene.source === 'yamnet' ? 'YAMNet ML live' : `${scene.source} audio scene`;
+  return `${model} · ${scene.distress ? 'distress' : 'normal'}`;
+}
+
+function formatAudioScene(scene: AudioSceneResult | null): string {
+  if (!scene || scene.tags.length === 0) return '';
+  return scene.tags
+    .slice(0, 2)
+    .map((tag) => `${tag.label} ${(tag.score * 100).toFixed(0)}%`)
+    .join(' · ');
 }
 
 function timeSince(ts: number): string {
@@ -233,11 +279,35 @@ const styles = StyleSheet.create({
   },
   logoutText: { color: theme.textPrimary, fontSize: 12, fontWeight: '700' },
   rightBtns: { flexDirection: 'row', gap: 8 },
-  voiceStatus: { position: 'absolute', top: 48, right: 16 },
-  voiceStatusText: { color: theme.textSecondary, fontSize: 11 },
+  agentStatus: {
+    position: 'absolute',
+    top: 48,
+    left: 16,
+    right: 16,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  agentTitle: { color: theme.textPrimary, fontSize: 13, fontWeight: '800' },
+  agentSub: { color: theme.textSecondary, fontSize: 10, marginTop: 2 },
+  mlStatus: {
+    position: 'absolute',
+    top: 112,
+    left: 16,
+    right: 16,
+    backgroundColor: 'rgba(46, 204, 113, 0.11)',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+  },
+  mlTitle: { color: theme.ok, fontSize: 12, fontWeight: '800' },
+  mlSub: { color: theme.textSecondary, fontSize: 10, marginTop: 2 },
+  voiceStatus: { position: 'absolute', top: 178, right: 16, left: 16, alignItems: 'flex-end' },
+  voiceStatusText: { color: theme.textSecondary, fontSize: 11, textAlign: 'right' },
   hint: {
     position: 'absolute',
-    bottom: 168,
+    bottom: 118,
     left: 24,
     right: 24,
     alignItems: 'center',

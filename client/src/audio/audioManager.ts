@@ -1,4 +1,10 @@
-import { Audio, InterruptionModeIOS } from 'expo-av';
+import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
+import {
+  AndroidAudioEncoder,
+  AndroidOutputFormat,
+  IOSAudioQuality,
+  IOSOutputFormat,
+} from 'expo-av/build/Audio/RecordingConstants';
 import * as Speech from 'expo-speech';
 // SDK 54 moved the classic file-system API (cacheDirectory, EncodingType,
 // readAsStringAsync, ...) to the /legacy entry point. Use it here to keep the
@@ -8,6 +14,33 @@ import { AUDIO_BUFFER } from '../config';
 import { breadcrumb, captureException } from '../sentry';
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+const LIVE_RECORDING_OPTIONS = {
+  isMeteringEnabled: true,
+  android: {
+    extension: '.m4a',
+    outputFormat: AndroidOutputFormat.MPEG_4,
+    audioEncoder: AndroidAudioEncoder.AAC,
+    sampleRate: 16000,
+    numberOfChannels: 1,
+    bitRate: 64000,
+  },
+  ios: {
+    extension: '.wav',
+    outputFormat: IOSOutputFormat.LINEARPCM,
+    audioQuality: IOSAudioQuality.MAX,
+    sampleRate: 16000,
+    numberOfChannels: 1,
+    bitRate: 256000,
+    linearPCMBitDepth: 16,
+    linearPCMIsBigEndian: false,
+    linearPCMIsFloat: false,
+  },
+  web: {
+    mimeType: 'audio/wav',
+    bitsPerSecond: 256000,
+  },
+};
 
 /**
  * AudioManager owns the microphone. It runs an always-on rolling ring buffer
@@ -98,16 +131,9 @@ class AudioManager {
         continue;
       }
       try {
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: true,
-          playsInSilentModeIOS: true,
-          staysActiveInBackground: true,
-          interruptionModeIOS: InterruptionModeIOS.DuckOthers,
-          shouldDuckAndroid: true,
-          playThroughEarpieceAndroid: false,
-        });
+        await this.configureRecordingMode();
         const rec = new Audio.Recording();
-        await rec.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+        await rec.prepareToRecordAsync(LIVE_RECORDING_OPTIONS);
         await rec.startAsync();
         this.current = rec;
 
@@ -157,6 +183,33 @@ class AudioManager {
 
   // ---- Mic arbitration ----
 
+  private async configureRecordingMode(): Promise<void> {
+    await Audio.setIsEnabledAsync(true);
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: true,
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: true,
+      interruptionModeIOS: InterruptionModeIOS.DuckOthers,
+      interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
+      shouldDuckAndroid: true,
+      playThroughEarpieceAndroid: false,
+    });
+  }
+
+  private async configurePlaybackMode(): Promise<void> {
+    await Audio.setIsEnabledAsync(true);
+    await Audio.setAudioModeAsync({
+      allowsRecordingIOS: false,
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: true,
+      interruptionModeIOS: InterruptionModeIOS.DoNotMix,
+      interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
+      shouldDuckAndroid: false,
+      playThroughEarpieceAndroid: false,
+    });
+    await delay(150);
+  }
+
   private async pauseBuffer(): Promise<void> {
     if (!this.running) return;
     this.paused = true;
@@ -182,38 +235,44 @@ class AudioManager {
     breadcrumb('audio', 'speak:play_start', { bytes: audioB64.length });
     await this.pauseBuffer();
     try {
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: true,
-        interruptionModeIOS: InterruptionModeIOS.DuckOthers,
-        shouldDuckAndroid: true,
-        playThroughEarpieceAndroid: false,
-      });
+      await this.configurePlaybackMode();
 
       const uri = `${FileSystem.cacheDirectory}qc-speak-${Date.now()}.wav`;
       await FileSystem.writeAsStringAsync(uri, audioB64, {
         encoding: FileSystem.EncodingType.Base64,
       });
 
-      const { sound } = await Audio.Sound.createAsync(
-        { uri },
-        { shouldPlay: true },
-      );
+      const sound = new Audio.Sound();
+      try {
+        await sound.loadAsync(
+          { uri },
+          { shouldPlay: false, volume: 1.0, isMuted: false, progressUpdateIntervalMillis: 100 },
+        );
 
-      await new Promise<void>((resolve) => {
-        sound.setOnPlaybackStatusUpdate((status) => {
-          if (status.isLoaded && status.didJustFinish) {
+        await new Promise<void>((resolve) => {
+          let settled = false;
+          const settle = () => {
+            if (settled) return;
+            settled = true;
             resolve();
-          } else if (!status.isLoaded && status.error) {
-            captureException(new Error(`playback error: ${status.error}`));
-            resolve();
-          }
+          };
+          sound.setOnPlaybackStatusUpdate((status) => {
+            if (status.isLoaded && status.didJustFinish) {
+              settle();
+            } else if (!status.isLoaded && status.error) {
+              captureException(new Error(`playback error: ${status.error}`));
+              settle();
+            }
+          });
+          sound.playAsync().catch((err) => {
+            captureException(err, { stage: 'playback' });
+            settle();
+          });
         });
-      });
-
-      await sound.unloadAsync();
-      await FileSystem.deleteAsync(uri, { idempotent: true });
+      } finally {
+        await sound.unloadAsync().catch(() => undefined);
+        await FileSystem.deleteAsync(uri, { idempotent: true });
+      }
       breadcrumb('audio', 'speak:play_done');
     } finally {
       this.resumeBuffer();
@@ -224,24 +283,25 @@ class AudioManager {
     breadcrumb('audio', 'speech:start');
     await this.pauseBuffer();
     try {
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: true,
-        interruptionModeIOS: InterruptionModeIOS.DuckOthers,
-        shouldDuckAndroid: true,
-        playThroughEarpieceAndroid: false,
-      });
-      Speech.stop();
+      await this.configurePlaybackMode();
+      await Speech.stop().catch((err) => captureException(err, { stage: 'speech_stop' }));
+      await delay(100);
       await new Promise<void>((resolve) => {
+        let settled = false;
+        const settle = () => {
+          if (settled) return;
+          settled = true;
+          resolve();
+        };
         Speech.speak(text, {
           rate: 0.95,
           pitch: 1.0,
-          onDone: resolve,
-          onStopped: resolve,
+          useApplicationAudioSession: true,
+          onDone: settle,
+          onStopped: settle,
           onError: (err) => {
             captureException(err, { stage: 'speech' });
-            resolve();
+            settle();
           },
         });
       });
@@ -259,19 +319,10 @@ class AudioManager {
 
     await this.pauseBuffer();
     try {
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
-        staysActiveInBackground: true,
-        interruptionModeIOS: InterruptionModeIOS.DuckOthers,
-        shouldDuckAndroid: true,
-        playThroughEarpieceAndroid: false,
-      });
+      await this.configureRecordingMode();
 
       const recording = new Audio.Recording();
-      await recording.prepareToRecordAsync(
-        Audio.RecordingOptionsPresets.HIGH_QUALITY,
-      );
+      await recording.prepareToRecordAsync(LIVE_RECORDING_OPTIONS);
       await recording.startAsync();
 
       await delay(durationMs);

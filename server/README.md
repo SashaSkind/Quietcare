@@ -16,8 +16,8 @@ to a mock when its API key is absent.
 ## Stack
 
 Python 3.11 · FastAPI (WS `/ws` + `GET /health`) · Anthropic Messages API
-(tool-use) · Deepgram (STT/TTS) · Redis (memory) · Twilio (telephony) · BAND
-(message bus) · Sentry (optional).
+(tool-use) · Deepgram (STT/TTS) · YAMNet/TFLite (audio-scene ML) · Redis
+(memory) · Twilio (telephony) · BAND (message bus) · Sentry (optional).
 
 ## Quickstart (all-mock, no keys)
 
@@ -53,7 +53,8 @@ python mock/send_trigger.py --scenario fine        # -> resolves silently
 ```
 server/
   app/
-    main.py            # FastAPI app: /health + WS /ws, background trigger tasks
+    main.py            # FastAPI app: /health + WS /ws (trigger, audio_probe,
+                       #   voice_conversation), background trigger tasks
     config.py          # env settings + capability flags
     protocol.py        # protocol v1 message models (mirrors shared/protocol.md)
     session.py         # per-elder session, trigger orchestration, caretaker svc
@@ -62,9 +63,13 @@ server/
     providers/
       llm.py           # LLM iface: AnthropicLLM + deterministic MockLLM
       voice.py         # Voice iface: DeepgramVoice + MockVoice
+      audio_scene.py   # Audio-scene iface: YamnetAudioScene + MockAudioScene
       memory.py        # Memory iface: RedisMemory + MockMemory (seeds Margaret)
       telephony.py     # Telephony iface: TwilioTelephony + MockTelephony
       bus.py           # MessageBus iface: BandBus + InProcessBus (default)
+      policy_gate.py   # re-sanctions gated actions (e.g. 911) independently
+      browser.py       # off-critical-path automation (Browserbase) + mock
+      security_scan.py # MCP-endpoint security posture (ArmorIQ) + mock
       factory.py       # auto-selects real vs mock per available config
     agents/
       base.py          # provider-agnostic tool-use loop
@@ -102,6 +107,7 @@ them and the invariants:
 | Memory     | Redis            | `REDIS_URL` set              | in-memory dict (seeded with Margaret) |
 | Telephony  | Twilio           | all `TWILIO_*` set           | logs `WOULD SEND/CALL …`              |
 | Bus        | BAND             | `BAND_API_KEY` + `BAND_BASE_URL` | in-process async fan-out          |
+| Audio scene| YAMNet (TFLite)  | model present in `models/`   | heuristic mock scene tagging          |
 | Sentry     | Sentry           | `SENTRY_DSN` set             | no-op (still logs)                    |
 
 ## Configuration

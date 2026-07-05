@@ -13,9 +13,13 @@ off, and loops in the right person **fast, without false alarms**.
 
 ## How it works
 
-A phone app watches motion + audio cheaply on-device. When something looks
-wrong it streams a short event to the cloud over a WebSocket. The backend then
-runs **two cooperating Claude agents**:
+A phone app watches motion + audio cheaply on-device. It continuously streams
+short audio segments as `audio_probe` frames — the backend tags the **YAMNet
+audio scene** and watches for a wake signal — and the elder can **hold to talk**
+to send a `voice_conversation` clip that the backend transcribes, answers with
+the conversation agent, and speaks back. When something looks wrong it streams a
+trigger event over the same WebSocket. The backend then runs **two cooperating
+Claude agents**:
 
 - **elder-agent** — reasons about the event, runs a spoken voice check-in, fuses
   the signals (trigger source + transcript + whether the elder responded + any
@@ -131,9 +135,11 @@ Every integration is wired behind an interface with an automatic mock fallback.
 The backend ships live diagnostics under `server/scripts/`:
 
 - `check_keys.py` / `check_remaining_sponsors.py` — live connectivity for every provider.
-- `verify_audio.py` — Deepgram STT↔TTS round-trip + YAMNet classification.
-- `verify_app_hook.py` — drives the app→elder→caretaker BAND mesh end-to-end.
+- `verify_audio.py` / `verify_yamnet.py` — Deepgram STT↔TTS round-trip + YAMNet classification.
+- `verify_app_hook.py` / `mesh_demo_kickoff.py` — drive the app→elder→caretaker BAND mesh end-to-end.
 - `verify_emergency_call.py` — places a real gated emergency-dispatch call (to a number you control).
+- `verify_observability.py` / `probe_armoriq.py` — Arize tracing + ArmorIQ security-scan checks.
+- `fake_phone.py` — simulates the phone over the WebSocket, sending a real spoken clip through the `voice_conversation` STT→agent→TTS loop.
 - `fetch_yamnet.py` — downloads the YAMNet model into `server/models/`.
 
 Run the test suite with `python -m unittest discover -s tests` from `server/`.

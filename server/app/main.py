@@ -612,10 +612,34 @@ async def _safe_handle_audio_probe(websocket: WebSocket, msg: AudioProbeMessage)
 async def _safe_handle_voice_conversation(websocket: WebSocket, msg: VoiceConversationMessage) -> None:
     try:
         providers = await _require_elder(msg.elder_id)
+        transcript = (msg.transcript or "").strip()
+        # Push-to-talk button sends raw audio; transcribe it on the backend.
+        if not transcript and msg.audio_clip_b64:
+            logger.info(
+                "voice_conversation[%s]: transcribing audio_b64_len=%d",
+                msg.elder_id,
+                len(msg.audio_clip_b64),
+            )
+            transcript = (await providers.voice.transcribe(msg.audio_clip_b64)).strip()
+            logger.info("voice_conversation[%s]: STT transcript=%r", msg.elder_id, transcript)
+        if not transcript:
+            # Nothing heard: reply gently instead of running the agent on empty.
+            reply_text = "I didn't catch that. Could you say it again?"
+            await websocket.send_text(
+                VoiceConversationReplyMessage(
+                    elder_id=msg.elder_id,
+                    action="chat",
+                    transcript="",
+                    reply_text=reply_text,
+                    audio_b64=await providers.voice.synthesize(reply_text),
+                    escalation=None,
+                ).model_dump_json()
+            )
+            return
         reply = await handle_elder_conversation(
             providers=providers,
             elder_id=msg.elder_id,
-            transcript=msg.transcript,
+            transcript=transcript,
             auto_emergency_fallback=settings.auto_emergency_fallback,
             caretaker_ack_timeout_seconds=settings.caretaker_ack_timeout_seconds,
         )

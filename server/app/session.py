@@ -8,6 +8,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional, TypedDict
 
+from starlette.websockets import WebSocketState
+
 from .protocol import (
     AckMessage,
     ListenMessage,
@@ -64,7 +66,20 @@ class ElderSession:
 
     # ---- outbound ----
     async def _send(self, model: Any) -> None:
-        await self.ws.send_text(model.model_dump_json())
+        # Background incident tasks may outlive the client connection (e.g. the
+        # elder reloads the app mid-check-in). Sending on a closed socket raises
+        # an ASGI RuntimeError, so skip when not connected and swallow the race.
+        ws = self.ws
+        state = getattr(ws, "application_state", None)
+        if state is not None and state != WebSocketState.CONNECTED:
+            logger.info(
+                "skip send to %s: ws not connected (%s)", self.elder_id, state
+            )
+            return
+        try:
+            await ws.send_text(model.model_dump_json())
+        except RuntimeError as exc:
+            logger.info("send to %s dropped (ws closed): %s", self.elder_id, exc)
 
     async def send_ack(self, received: str) -> None:
         await self._send(AckMessage(received=received))

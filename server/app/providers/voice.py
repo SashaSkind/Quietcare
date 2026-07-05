@@ -57,17 +57,24 @@ class DeepgramVoice(Voice):
 
     async def transcribe(self, audio_b64: str | None) -> str:
         if not audio_b64:
+            logger.info("Deepgram transcribe: empty audio_b64 (nothing to send)")
             return ""
         from deepgram import PrerecordedOptions
 
         audio = base64.b64decode(audio_b64)
-        source = {"buffer": audio, "mimetype": _guess_mimetype(audio)}
+        mimetype = _guess_mimetype(audio)
+        logger.info(
+            "Deepgram transcribe: %d bytes, mimetype=%s", len(audio), mimetype
+        )
+        source = {"buffer": audio, "mimetype": mimetype}
         options = PrerecordedOptions(model="nova-2", smart_format=True)
         try:
             resp = await self._client.listen.asyncrest.v("1").transcribe_file(
                 source, options
             )
-            return resp.results.channels[0].alternatives[0].transcript or ""
+            transcript = resp.results.channels[0].alternatives[0].transcript or ""
+            logger.info("Deepgram transcribe result: %r", transcript)
+            return transcript
         except Exception:
             logger.warning("Deepgram transcription failed", exc_info=True)
             return ""

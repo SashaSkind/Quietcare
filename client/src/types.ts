@@ -59,7 +59,10 @@ export interface VoiceConversationMessage {
   type: 'voice_conversation';
   elder_id: string;
   ts: string;
-  transcript: string;
+  // Wake-word path sends a client transcript; push-to-talk sends raw audio for
+  // the backend to transcribe. At least one must be set.
+  transcript?: string;
+  audio_clip_b64?: string | null;
 }
 
 export interface HeartbeatMessage {

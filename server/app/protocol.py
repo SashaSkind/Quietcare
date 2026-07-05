@@ -75,7 +75,10 @@ class VoiceConversationMessage(BaseModel):
     elder_id: str
     device_token: Optional[str] = None
     ts: Optional[str] = None
-    transcript: str
+    # Either a client-side transcript (e.g. wake-word path) or raw audio for
+    # the backend to transcribe (push-to-talk button). At least one is set.
+    transcript: Optional[str] = None
+    audio_clip_b64: Optional[str] = None
 
 
 class HeartbeatMessage(BaseModel):

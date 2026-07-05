@@ -132,8 +132,21 @@ async def run_elder_agent(session: "ElderSession", llm: LLM) -> str:
             response = await session.await_audio_response(prompt_id)
             audio_b64 = response.get("audio_b64")
             transcript = (response.get("transcript") or "").strip()
+            logger.info(
+                "listen_to_elder[%s/%s]: audio_b64_len=%d client_transcript=%r",
+                elder_id,
+                prompt_id,
+                len(audio_b64 or ""),
+                transcript,
+            )
             if not transcript:
                 transcript = await p.voice.transcribe(audio_b64)
+                logger.info(
+                    "listen_to_elder[%s/%s]: STT transcript=%r",
+                    elder_id,
+                    prompt_id,
+                    transcript,
+                )
             session.last_transcript = transcript
             # Classify non-speech sounds in the response for the decision fusion.
             scene = await p.audio_scene.classify(audio_b64)

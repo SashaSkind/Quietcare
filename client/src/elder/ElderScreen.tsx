@@ -11,7 +11,8 @@ import { useElderWebSocket } from './useElderWebSocket';
 type AudioSceneResult = AudioProbeResultMessage['audio_scene'];
 
 export function ElderScreen({ onLogout }: { user: DemoUser; onLogout: () => void }) {
-  const { machine, connection, voice, agentMode, scene, sendFallTrigger } = useElderWebSocket();
+  const { machine, connection, voice, agentMode, scene, sendFallTrigger, startTalking, stopTalking, talking, micLevel } =
+    useElderWebSocket();
   const [mag, setMag] = useState(1);
   const [lastFall, setLastFall] = useState<number | null>(null);
 
@@ -79,6 +80,31 @@ export function ElderScreen({ onLogout }: { user: DemoUser; onLogout: () => void
           )}
         </View>
       )}
+
+      {armed && (
+        <View style={styles.talkBar}>
+          <Pressable
+            style={[styles.talkBtn, talking && styles.talkBtnActive]}
+            onPressIn={startTalking}
+            onPressOut={stopTalking}
+          >
+            <Text style={styles.talkBtnText}>
+              {talking ? '● Listening… release to send' : '🎙  Hold to talk'}
+            </Text>
+          </Pressable>
+          <Text style={styles.talkHint}>Press and hold, speak, then release</Text>
+          {micLevel != null && (
+            <View style={styles.meterRow}>
+              <View style={styles.meterTrack}>
+                <View style={[styles.meterFill, { width: `${meterPct(micLevel)}%` }]} />
+              </View>
+              <Text style={styles.meterText}>
+                mic {micLevel.toFixed(0)} dB {micLevel <= -50 ? '· silent?' : '· hearing you'}
+              </Text>
+            </View>
+          )}
+        </View>
+      )}
     </View>
   );
 }
@@ -95,6 +121,12 @@ function formatAudioScene(scene: AudioSceneResult | null): string {
     .slice(0, 2)
     .map((tag) => `${tag.label} ${(tag.score * 100).toFixed(0)}%`)
     .join(' · ');
+}
+
+// Map dBFS (~ -60 silence .. 0 max) to a 0-100% meter width.
+function meterPct(dbfs: number): number {
+  const clamped = Math.max(-60, Math.min(0, dbfs));
+  return Math.round(((clamped + 60) / 60) * 100);
 }
 
 function timeSince(ts: number): string {
@@ -167,4 +199,26 @@ const styles = StyleSheet.create({
   },
   hintText: { color: theme.textSecondary, fontSize: 13, textAlign: 'center', opacity: 0.85 },
   hintSub: { color: theme.textSecondary, fontSize: 11, opacity: 0.7, marginTop: 3 },
+  talkBar: { position: 'absolute', bottom: 48, left: 24, right: 24, alignItems: 'center' },
+  talkBtn: {
+    backgroundColor: theme.accent,
+    borderRadius: 999,
+    paddingHorizontal: 28,
+    paddingVertical: 16,
+    minWidth: 240,
+    alignItems: 'center',
+  },
+  talkBtnActive: { backgroundColor: theme.danger },
+  talkBtnText: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  talkHint: { color: theme.textSecondary, fontSize: 11, marginTop: 8, opacity: 0.8 },
+  meterRow: { marginTop: 10, alignItems: 'center', width: '100%' },
+  meterTrack: {
+    width: 220,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    overflow: 'hidden',
+  },
+  meterFill: { height: 8, borderRadius: 4, backgroundColor: theme.ok },
+  meterText: { color: theme.textSecondary, fontSize: 11, marginTop: 5 },
 });

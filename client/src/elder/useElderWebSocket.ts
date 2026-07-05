@@ -19,6 +19,10 @@ export interface ElderWebSocketState {
   agentMode: string;
   scene: AudioSceneResult | null;
   sendFallTrigger: () => void;
+  startTalking: () => void;
+  stopTalking: () => void;
+  talking: boolean;
+  micLevel: number | null;
 }
 
 function deviceState(): DeviceState {
@@ -41,6 +45,9 @@ export function useElderWebSocket(): ElderWebSocketState {
   const [voice, setVoice] = useState('');
   const [agentMode, setAgentMode] = useState('Connecting backend WebSocket…');
   const [scene, setScene] = useState<AudioSceneResult | null>(null);
+  const [talking, setTalking] = useState(false);
+  const [micLevel, setMicLevel] = useState<number | null>(null);
+  const talkingRef = useRef(false);
 
   const wsRef = useRef<WebSocketClient | null>(null);
   const stateRef = useRef<DemoState>('idle');
@@ -70,7 +77,7 @@ export function useElderWebSocket(): ElderWebSocketState {
       setState('idle');
       setCountdown(COUNTDOWN_SECONDS);
       setTranscript('');
-      setAgentMode('Agent asleep · say “Hey Quietcare”');
+      setAgentMode('Hold “Talk to Quietcare” to chat');
     }, 3200);
   }, []);
 
@@ -137,6 +144,57 @@ export function useElderWebSocket(): ElderWebSocketState {
     void sendTrigger('fall');
   }, [sendTrigger]);
 
+  // Push-to-talk (press and hold): start recording on press, stop and send on
+  // release. The user controls the exact capture window, which avoids the
+  // timing gap of a fixed-duration recording where speech can fall outside it.
+  // Replaces the "Hey Quietcare" wake word for starting a chat.
+  const startTalking = useCallback(() => {
+    if (talkingRef.current || conversingRef.current) return;
+    if (stateRef.current !== 'idle') return;
+    talkingRef.current = true;
+    conversingRef.current = true; // suppress probe-driven wake while talking
+    setTalking(true);
+    setAgentMode('Listening… release to send');
+    setVoice('recording — speak now');
+    audioManager.startManualRecording().catch((err) => {
+      talkingRef.current = false;
+      conversingRef.current = false;
+      setTalking(false);
+      setVoice(`talk start failed: ${String(err)}`);
+      setAgentMode('Hold “Talk to Quietcare” to chat');
+      captureException(err, { stage: 'talk_start' });
+    });
+  }, []);
+
+  const stopTalking = useCallback(() => {
+    if (!talkingRef.current) return;
+    talkingRef.current = false;
+    setTalking(false);
+    setAgentMode('Sending to Quietcare…');
+    audioManager
+      .stopManualRecordingB64()
+      .then((audio_clip_b64) => {
+        if (!audio_clip_b64) {
+          setVoice('no audio captured — hold the button while speaking');
+          setAgentMode('Hold “Talk to Quietcare” to chat');
+          conversingRef.current = false;
+          return;
+        }
+        wsRef.current?.send({
+          type: 'voice_conversation',
+          elder_id: ELDER_ID,
+          ts: new Date().toISOString(),
+          audio_clip_b64,
+        });
+      })
+      .catch((err) => {
+        setVoice(`talk send failed: ${String(err)}`);
+        setAgentMode('Hold “Talk to Quietcare” to chat');
+        conversingRef.current = false;
+        captureException(err, { stage: 'talk_stop' });
+      });
+  }, []);
+
   const handleProbeResult = useCallback((msg: AudioProbeResultMessage) => {
     probeInFlightRef.current = false;
     setScene(msg.audio_scene);
@@ -151,7 +209,7 @@ export function useElderWebSocket(): ElderWebSocketState {
       return;
     }
     if (!msg.wants_attention) {
-      setAgentMode('Agent asleep · say “Hey Quietcare”');
+      setAgentMode('Hold “Talk to Quietcare” to chat');
       setVoice(`heard: ${heard} · wake word needed`);
       return;
     }
@@ -233,7 +291,7 @@ export function useElderWebSocket(): ElderWebSocketState {
             clearCountdown();
             setState('idle');
             setTranscript('');
-            setAgentMode('Agent asleep · say “Hey Quietcare”');
+            setAgentMode('Hold “Talk to Quietcare” to chat');
           }
           break;
         }
@@ -255,7 +313,7 @@ export function useElderWebSocket(): ElderWebSocketState {
             })
             .finally(() => {
               conversingRef.current = false;
-              if (msg.action !== 'escalated') setAgentMode('Agent asleep · say “Hey Quietcare”');
+              if (msg.action !== 'escalated') setAgentMode('Hold “Talk to Quietcare” to chat');
             });
           break;
         }
@@ -274,13 +332,15 @@ export function useElderWebSocket(): ElderWebSocketState {
       onLog: () => undefined,
       onStateChange: (next) => {
         setConnection(next);
-        if (next === 'open') setAgentMode('Agent asleep · say “Hey Quietcare”');
+        if (next === 'open') setAgentMode('Hold “Talk to Quietcare” to chat');
         if (next !== 'open') setAgentMode(`Backend WebSocket ${next}`);
       },
       getDeviceState: deviceState,
     });
     wsRef.current = ws;
     ws.connect();
+
+    const unsubscribeMeter = audioManager.onMeter((dbfs) => setMicLevel(dbfs));
 
     const unsubscribe = audioManager.onAudioSegment((audio_clip_b64) => {
       if (stateRef.current !== 'idle' || probeInFlightRef.current || conversingRef.current) return;
@@ -311,6 +371,7 @@ export function useElderWebSocket(): ElderWebSocketState {
     return () => {
       ws.close();
       unsubscribe();
+      unsubscribeMeter();
       clearCountdown();
       if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
       void audioManager.stopRollingBuffer();
@@ -335,5 +396,16 @@ export function useElderWebSocket(): ElderWebSocketState {
     [clearCountdown, countdown, sendPromptTranscript, sendTrigger, state, transcript],
   );
 
-  return { machine, connection, voice, agentMode, scene, sendFallTrigger };
+  return {
+    machine,
+    connection,
+    voice,
+    agentMode,
+    scene,
+    sendFallTrigger,
+    startTalking,
+    stopTalking,
+    talking,
+    micLevel,
+  };
 }

@@ -18,8 +18,8 @@
 # Tip: you can reuse your existing BAND agent as the "elder" — put its UUID and
 # key here, and register just one new agent for "caretaker".
 elder:
-  agent_id: "4f78e8c1-1ef9-4b04-a55a-ae13f5782e6d"
-  api_key: "band_a_1782062415_iEsZoHPvmC60P6fKEaKkzSnU9Zr6eHPn"
+  agent_id: ""
+  api_key: ""
 caretaker:
-  agent_id: "8d8890c3-b563-4b87-849e-61e33ca4eca2"
-  api_key: "band_a_1782062365_1bfFKxjnDAxZtXib8XD0dTJ1_OceO2xz"
+  agent_id: ""
+  api_key: ""

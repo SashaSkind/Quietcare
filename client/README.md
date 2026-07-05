@@ -11,8 +11,19 @@ short event to the cloud backend over a WebSocket (protocol v1, see
 
 ## Features
 
-- **One screen:** large status banner (*All good* / *Checking in…* / *Alerting
-  caretaker…*), a big **Simulate Fall** button, and a scrolling debug log.
+- **Multi-screen app:** a login/session picker (`app/`), the ambient **elder
+  screen** (status orb, agent-mode panel, live YAMNet audio-scene readout, and a
+  press-and-hold voice button), and a **caretaker** dashboard + agent-flow view
+  (`caretaker/`).
+- **Voice assistant (press-and-hold):** the elder holds **“Hold to talk”**,
+  speaks, and releases; the clip is sent as a `voice_conversation` frame. The
+  backend transcribes it, runs the conversation agent, and returns spoken audio
+  that the app plays back. A live **mic-level meter** (dBFS) shows capture is
+  working while held.
+- **Continuous audio probe:** rolling-buffer segments are streamed as
+  `audio_probe` frames; the backend replies with `audio_probe_result` carrying a
+  transcript, a `wants_attention` wake signal, and the **YAMNet audio scene**,
+  which is surfaced live on the elder screen.
 - **Resilient WebSocket client:** sends `register` on connect, `heartbeat` every
   30s, auto-reconnects with exponential backoff, logs every message in/out.
 - **On-device fall detection:** `expo-sensors` accelerometer at ~50 Hz feeds a
@@ -41,10 +52,12 @@ short event to the cloud backend over a WebSocket (protocol v1, see
 
 ## Stack
 
-Expo (managed, TypeScript) targeting a **development build** (native audio +
-on-device ML need more than Expo Go). `expo-sensors`, `expo-av`,
-`expo-file-system`, `@sentry/react-native`, native WebSocket API. Demo target:
-**Android**.
+Expo **SDK 54** (managed, TypeScript, New Architecture) targeting a
+**development build** (native audio + on-device sensors need more than Expo Go).
+Key deps: `react-native@0.81.5`, `expo-sensors`, `expo-av@~16`,
+`expo-camera@~17`, `expo-file-system`, `@sentry/react-native@~7.2`, native
+WebSocket API. Dev targets: **iOS + Android** (`npm run ios` / `npm run
+android`).
 
 ## Prerequisites
 
@@ -77,9 +90,8 @@ cp .env.example .env   # adjust EXPO_PUBLIC_WS_URL if needed
 The mock is a throwaway test harness (the one exception to "client only"):
 
 ```bash
-cd client/mock
-npm install
-npm start            # ws://0.0.0.0:8080/ws
+cd client
+npm run mock         # node mock/server.js -> ws://0.0.0.0:8080/ws
 ```
 
 It accepts `register`/`trigger`, replies with `speak` then `listen`, prints the
@@ -171,28 +183,48 @@ set `organization` / `project` in the `@sentry/react-native/expo` plugin block i
 client/
   App.tsx                  # root component (wrapped with Sentry)
   index.ts                 # entry point
-  app.json, eas.json       # Expo + EAS dev-build config
+  app.json, eas.json       # Expo (SDK 54, New Arch) + EAS dev-build config
   scripts/gen-audio.js     # regenerates the bundled sample WAV
-  mock/                    # throwaway ws test backend
+  mock/                    # throwaway ws test backend (npm run mock)
   src/
     config.ts              # env-driven config
     types.ts               # protocol v1 message types
     sentry.ts              # Sentry init + helpers
     ws/WebSocketClient.ts  # resilient socket (register/heartbeat/reconnect)
-    audio/audioManager.ts  # mic owner: rolling buffer + play + record
+    audio/audioManager.ts  # mic owner: rolling buffer, play, record, push-to-talk + meter
     sensors/               # accelerometer monitor + threshold detectFall
     camera/                # CameraCapture view + cameraManager (frame_b64)
+    app/                   # LoginScreen, RootNavigator, session
+    elder/                 # ElderScreen, useElderWebSocket, useFallSensor
+    caretaker/             # CaretakerDashboard, AgentFlowScreen, ElderPickerScreen, api
+    design/                # DemoScreen, Orb, FallPrompt, theme, useDemoMachine
     components/            # StatusBanner, DebugLog
-    hooks/useQuietcare.ts  # orchestration
+    hooks/useQuietcare.ts  # legacy single-screen orchestration hook
     assets/sampleAudio.ts  # generated base64 WAV
 ```
 
 ## Out of scope
 
-Agents, LLM calls, Deepgram, Twilio, Redis, real fall-detection ML, the caretaker
-side, anything in `/server`.
+Agents, LLM calls, Deepgram/STT/TTS, Twilio, Redis, and anything in `/server`.
+(The caretaker **dashboard UI** lives here in `caretaker/`, but the caretaker
+*agent* and all provider integrations remain server-side.)
 
 ## CHANGELOG
+
+### 0.4.0
+- **Voice assistant**: press-and-hold **“Hold to talk”** on the elder screen
+  records a clip and sends it as `voice_conversation`; the backend transcribes,
+  runs the conversation agent, and returns spoken audio that the app plays. Added
+  a live **mic-level meter** (dBFS) for capture diagnostics and a settle delay so
+  post-playback recordings capture audio instead of silence.
+- **Continuous audio probe**: rolling-buffer segments stream as `audio_probe`;
+  the backend returns transcript + `wants_attention` + **YAMNet audio scene**,
+  shown live on the elder screen.
+- **Multi-screen UI**: login/session, ambient elder screen, and caretaker
+  dashboard/agent-flow views.
+- **SDK 54 upgrade**: `expo@^54`, `react-native@0.81.5`,
+  `@sentry/react-native@~7.2`, New Architecture enabled; iOS + Android dev
+  targets.
 
 ### 0.3.0
 - **Camera snapshot**: front-facing `expo-camera` preview captures a still at
